@@ -1,0 +1,46 @@
+:root {
+  /* Admin Dark Surface Palette */
+  --admin-bg-base: #090d16;
+  --admin-bg-sidebar: #0e1422;
+  --admin-bg-surface: #131b2e;
+  --admin-bg-card: #162036;
+  --admin-bg-card-hover: #1c2844;
+  --admin-bg-input: #101726;
+
+  /* Accent Colors */
+  --admin-primary: #e11d48;
+  --admin-primary-hover: #f43f5e;
+  --admin-primary-light: rgba(225, 29, 72, 0.15);
+  --admin-primary-gradient: linear-gradient(135deg, #e11d48 0%, #be123c 100%);
+
+  /* Semantic Status Colors */
+  --status-success-bg: rgba(16, 185, 129, 0.15);
+  --status-success-text: #34d399;
+  --status-warning-bg: rgba(245, 158, 11, 0.15);
+  --status-warning-text: #fbbf24;
+  --status-danger-bg: rgba(239, 68, 68, 0.15);
+  --status-danger-text: #f87171;
+  --status-info-bg: rgba(59, 130, 246, 0.15);
+  --status-info-text: #60a5fa;
+
+  /* Text Colors */
+  --admin-text-main: #f8fafc;
+  --admin-text-secondary: #94a3b8;
+  --admin-text-muted: #64748b;
+
+  /* Borders & Shadows */
+  --admin-border: rgba(255, 255, 255, 0.08);
+  --admin-border-focus: rgba(225, 29, 72, 0.5);
+  --admin-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  --admin-shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.6);
+
+  /* Radii */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 9999px;
+
+  /* Dimensions */
+  --sidebar-width: 260px;
+  --header-height: 68px;
+}
