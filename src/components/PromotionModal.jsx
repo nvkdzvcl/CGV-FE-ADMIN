@@ -3,28 +3,49 @@ import { X, Gift, Check } from 'lucide-react';
 
 export default function PromotionModal({ onClose, onSave }) {
   const [code, setCode] = useState('');
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
   const [discountType, setDiscountType] = useState('FIXED');
   const [discountValue, setDiscountValue] = useState(50000);
   const [minOrderValue, setMinOrderValue] = useState(150000);
   const [applicableTier, setApplicableTier] = useState('MEMBER');
-  const [usageLimit, setUsageLimit] = useState(10000);
+  const [usageLimit, setUsageLimit] = useState(1000);
+  const [validFrom, setValidFrom] = useState('2026-09-24');
   const [validTo, setValidTo] = useState('2026-12-31');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    onSave({
-      id: 'promo-' + Date.now().toString().slice(-4),
+    setError('');
+
+    const fromIso = new Date(`${validFrom}T00:00:00+07:00`).toISOString();
+    const toIso = new Date(`${validTo}T23:59:59+07:00`).toISOString();
+
+    const promoPayload = {
       code: code.toUpperCase().trim(),
+      name: name || `Khuyến mãi ${code.toUpperCase().trim()}`,
+      description: description || 'Áp dụng giảm giá khi đặt vé tại CGV',
       discountType,
       discountValue: Number(discountValue),
       minOrderValue: Number(minOrderValue),
       applicableTier,
       usageLimit: Number(usageLimit),
-      usageCount: 0,
-      validTo,
-      status: 'ACTIVE'
-    });
-    onClose();
+      maxUsesPerUser: 1,
+      validFrom: fromIso,
+      validTo: toIso,
+      isActive: true
+    };
+
+    setSubmitting(true);
+    try {
+      await onSave(promoPayload);
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Lỗi khi tạo khuyến mãi.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -39,16 +60,37 @@ export default function PromotionModal({ onClose, onSave }) {
 
         <form onSubmit={handleSubmit}>
           <div className="modal-admin-body">
-            <div className="form-field">
-              <label>Mã Voucher (Code)</label>
-              <input
-                type="text"
-                required
-                placeholder="VD: CGVSUMMER50K"
-                value={code}
-                onChange={e => setCode(e.target.value)}
-                style={{ textTransform: 'uppercase' }}
-              />
+            {error && (
+              <div style={{
+                background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)',
+                padding: '10px 14px', borderRadius: 8, color: '#f87171', fontSize: '0.85rem'
+              }}>
+                {error}
+              </div>
+            )}
+
+            <div className="form-row">
+              <div className="form-field">
+                <label>Mã Voucher (Code)</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="VD: CGVSUMMER50K"
+                  value={code}
+                  onChange={e => setCode(e.target.value)}
+                  style={{ textTransform: 'uppercase' }}
+                />
+              </div>
+              <div className="form-field">
+                <label>Tên chương trình khuyến mãi</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="VD: Giảm 50K Chào Hè CGV"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                />
+              </div>
             </div>
 
             <div className="form-row">
@@ -100,14 +142,24 @@ export default function PromotionModal({ onClose, onSave }) {
                 />
               </div>
               <div className="form-field">
-                <label>Hạn sử dụng đến ngày</label>
+                <label>Ngày bắt đầu</label>
                 <input
                   type="date"
                   required
-                  value={validTo}
-                  onChange={e => setValidTo(e.target.value)}
+                  value={validFrom}
+                  onChange={e => setValidFrom(e.target.value)}
                 />
               </div>
+            </div>
+
+            <div className="form-field">
+              <label>Ngày hết hạn</label>
+              <input
+                type="date"
+                required
+                value={validTo}
+                onChange={e => setValidTo(e.target.value)}
+              />
             </div>
           </div>
 
@@ -115,8 +167,8 @@ export default function PromotionModal({ onClose, onSave }) {
             <button type="button" className="btn-admin-secondary" onClick={onClose}>
               Hủy
             </button>
-            <button type="submit" className="btn-admin-primary">
-              <Check size={16} /> Tạo Voucher
+            <button type="submit" className="btn-admin-primary" disabled={submitting}>
+              <Check size={16} /> {submitting ? 'Đang lưu...' : 'Lưu voucher'}
             </button>
           </div>
         </form>
