@@ -3,7 +3,7 @@ import { Film, Shield, Lock, User, AlertCircle, ArrowRight, CheckCircle2 } from 
 import { AdminApi } from '../services/adminApi';
 
 export default function AdminLoginScreen({ onLoginSuccess }) {
-  const [username, setUsername] = useState('admin_test');
+  const [username, setUsername] = useState('admin@gmail.com');
   const [password, setPassword] = useState('admin123');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -101,7 +101,7 @@ export default function AdminLoginScreen({ onLoginSuccess }) {
                 required
                 className="table-search-input"
                 style={{ width: '100%', paddingLeft: 40, height: 42 }}
-                placeholder="admin_test"
+                placeholder="admin@gmail.com"
                 value={username}
                 onChange={e => setUsername(e.target.value)}
               />
@@ -145,12 +145,12 @@ export default function AdminLoginScreen({ onLoginSuccess }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <button
               type="button"
-              onClick={() => handleQuickFill('admin_test', 'admin123')}
+              onClick={() => handleQuickFill('admin@gmail.com', 'admin123')}
               className="btn-admin-secondary"
               style={{ justifyContent: 'space-between', padding: '8px 12px', fontSize: '0.8rem' }}
             >
               <span>👑 <strong>Super Admin</strong> (Toàn quyền hệ thống)</span>
-              <code style={{ fontSize: '0.72rem', color: 'var(--admin-primary-hover)' }}>admin_test</code>
+              <code style={{ fontSize: '0.72rem', color: 'var(--admin-primary-hover)' }}>admin@gmail.com</code>
             </button>
             <button
               type="button"

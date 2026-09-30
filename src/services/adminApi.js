@@ -5,7 +5,7 @@ import {
 } from '../data/adminMockData';
 import { realtime, REALTIME_EVENTS } from './realtimeService';
 
-const API_BASE = import.meta.env.VITE_API_GATEWAY_URL || 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_GATEWAY_URL || 'https://d2z63drupmmdh8.cloudfront.net';
 
 const TOKEN_KEY = 'cgv_admin_token';
 const REFRESH_TOKEN_KEY = 'cgv_admin_refresh_token';
@@ -102,8 +102,7 @@ async function adminFetch(path, options = {}, fallbackData = null) {
           refreshQueue.forEach(p => p.reject(refreshErr));
           refreshQueue = [];
           clearAdminSession();
-          window.location.reload();
-          throw new Error('Session expired. Please login again.');
+          throw new Error('Phiên làm việc đã hết hạn. Vui lòng đăng nhập lại.');
         } finally {
           isRefreshing = false;
         }
@@ -119,7 +118,7 @@ async function adminFetch(path, options = {}, fallbackData = null) {
 
     return json?.data !== undefined ? json.data : json;
   } catch (err) {
-    if (fallbackData !== null && !err.message?.includes('Session expired')) {
+    if (fallbackData !== null && !err.message?.includes('Phiên làm việc đã hết hạn')) {
       console.warn(`[Admin API Fallback] ${path} -> using mock fallback:`, err.message);
       return typeof fallbackData === 'function' ? fallbackData() : fallbackData;
     }
@@ -136,45 +135,66 @@ export const AdminApi = {
       const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ username: username.trim(), password: password.trim() })
       });
-      const json = await res.json();
-      if (!res.ok || (json.status && json.status !== 200)) {
-        throw new Error(json.message || 'Đăng nhập quản trị viên thất bại.');
+      const json = await res.json().catch(() => null);
+      if (!res.ok || (json && json.status && json.status !== 200)) {
+        throw new Error(json?.message || 'Đăng nhập quản trị viên thất bại. Sai tài khoản hoặc mật khẩu.');
       }
-      const data = json.data || json;
-      if (data.accessToken) {
-        saveAdminToken(data.accessToken);
-        if (data.refreshToken) saveAdminRefreshToken(data.refreshToken);
+      const data = json?.data || json;
+      if (data && data.accessToken) {
+        let userRoles = [];
+        let parsedUser = null;
         try {
           const parts = data.accessToken.split('.');
           if (parts.length === 3) {
             const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
-            const roles = payload.realm_access?.roles || [];
-            const user = {
+            userRoles = payload.realm_access?.roles || [];
+
+            // DANH SÁCH ROLE ĐƯỢC PHÉP VÀO ADMIN:
+            const ALLOWED_ADMIN_ROLES = ['SUPER_ADMIN', 'CINEMA_MANAGER', 'TICKET_STAFF', 'CONTENT_MANAGER', 'ADMIN'];
+            const matchedRoles = userRoles.filter(r => ALLOWED_ADMIN_ROLES.includes(r));
+            const isNormalUser = userRoles.includes('MEMBER_USER') || userRoles.includes('USER');
+
+            // KIỂM TRA ROLE KHÔNG ĐƯỢC PHÉP LÀ USER (Từ chối ngay lập tức nếu chỉ là khách hàng):
+            if (matchedRoles.length === 0 || (isNormalUser && matchedRoles.length === 0)) {
+              clearAdminSession();
+              throw new Error('Tài khoản của bạn là tài khoản người dùng (USER/MEMBER_USER), không có quyền truy cập vào Cổng Quản Trị Viên (Admin Portal)!');
+            }
+
+            const primaryRole = userRoles.includes('SUPER_ADMIN')
+              ? 'SUPER_ADMIN'
+              : (userRoles.includes('CINEMA_MANAGER')
+                ? 'CINEMA_MANAGER'
+                : (userRoles.includes('TICKET_STAFF') ? 'TICKET_STAFF' : 'CONTENT_MANAGER'));
+
+            parsedUser = {
               fullName: payload.name || payload.preferred_username || username,
               email: payload.email || `${username}@cgv.vn`,
-              role: roles.includes('SUPER_ADMIN') ? 'SUPER_ADMIN' : (roles.includes('CINEMA_MANAGER') ? 'CINEMA_MANAGER' : 'TICKET_STAFF'),
-              roles
+              role: primaryRole,
+              roles: userRoles
             };
-            saveAdminUser(user);
-            return { success: true, token: data.accessToken, user };
           }
-        } catch {
-          // ignore jwt parse error
+        } catch (jwtErr) {
+          if (jwtErr.message?.includes('không có quyền truy cập')) {
+            throw jwtErr;
+          }
+          console.warn('JWT parse warning:', jwtErr);
         }
-        const defaultUser = { fullName: username, email: `${username}@cgv.vn`, role: 'ADMIN' };
-        saveAdminUser(defaultUser);
-        return { success: true, token: data.accessToken, user: defaultUser };
+
+        if (!parsedUser) {
+          clearAdminSession();
+          throw new Error('Không thể xác minh thẩm quyền quản trị viên từ token của bạn.');
+        }
+
+        saveAdminToken(data.accessToken);
+        if (data.refreshToken) saveAdminRefreshToken(data.refreshToken);
+        saveAdminUser(parsedUser);
+        return { success: true, token: data.accessToken, user: parsedUser };
       }
       throw new Error('Không nhận được token xác thực từ máy chủ.');
     } catch (err) {
-      console.warn('Real login failed, checking fallback:', err.message);
-      if (username === 'admin_test' || username === 'admin') {
-        const mockUser = { fullName: 'CGV SuperAdmin', email: 'admin@cgv.vn', role: 'SUPER_ADMIN', roles: ['SUPER_ADMIN'] };
-        saveAdminUser(mockUser);
-        return { success: true, token: 'mock-admin-token', user: mockUser };
-      }
+      clearAdminSession();
       throw err;
     }
   },
