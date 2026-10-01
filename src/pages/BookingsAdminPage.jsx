@@ -104,10 +104,12 @@ export default function BookingsAdminPage() {
   // ─── BỘ LỌC ĐA CHIỀU TRÊN CLIENT ───
   const filteredBookings = useMemo(() => {
     return bookings.filter(b => {
-      // 1. Keyword: mã vé, tên, sđt, email, phim, rạp
+      // 1. Keyword: mã vé, mã vạch (CGV-XXXXX), tên, sđt, email, phim, rạp
       const q = keyword.trim().toLowerCase();
       if (q) {
-        const mId = String(b.id || '').toLowerCase().includes(q);
+        const cleanQ = q.replace(/^(cgv-)/i, '').replace(/-/g, '');
+        const idNoHyphen = String(b.id || '').replace(/-/g, '').toLowerCase();
+        const mId = String(b.id || '').toLowerCase().includes(q) || (cleanQ.length >= 4 && idNoHyphen.includes(cleanQ));
         const mName = String(b.userName || '').toLowerCase().includes(q);
         const mPhone = String(b.userPhone || '').toLowerCase().includes(q);
         const mEmail = String(b.userEmail || '').toLowerCase().includes(q);

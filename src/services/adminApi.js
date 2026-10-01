@@ -766,8 +766,8 @@ export const AdminApi = {
     // 1. Match standard 36-char UUID (8-4-4-4-12 hex format)
     const match = trimmed.match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);
     if (match) return match[0].toLowerCase();
-    // 2. Strip standard prefixes like CGV_TICKET_, TICKET_, BK-, etc.
-    return trimmed.replace(/^(CGV_TICKET_|TICKET_|BK-|BOOKING_)/i, '');
+    // 2. Strip standard prefixes like CGV_TICKET_, TICKET_, BK-, BOOKING_, CGV-
+    return trimmed.replace(/^(CGV_TICKET_|TICKET_|BK-|BOOKING_|CGV-)/i, '');
   },
 
   adminCheckIn: async (bookingId) => {
@@ -788,8 +788,24 @@ export const AdminApi = {
     if (!ticketCode || !ticketCode.trim()) {
       return { valid: false, message: 'Mã vé không được để trống.' };
     }
-    const cleanId = AdminApi.extractUuid(ticketCode);
-    const isStandardUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(cleanId);
+    let cleanId = AdminApi.extractUuid(ticketCode);
+    let isStandardUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(cleanId);
+
+    // If it's a barcode prefix (e.g. CGV-F3C7060ACE -> F3C7060ACE, 8 to 14 hex chars)
+    if (!isStandardUuid && /^[0-9a-fA-F]{8,14}$/.test(cleanId)) {
+      try {
+        const bookingsList = await AdminApi.searchBookings('', 0, 100);
+        const matched = bookingsList.find(b =>
+          String(b.id).replace(/-/g, '').toLowerCase().startsWith(cleanId.toLowerCase())
+        );
+        if (matched) {
+          cleanId = matched.id;
+          isStandardUuid = true;
+        }
+      } catch (e) {
+        console.warn('Barcode prefix match fallback:', e);
+      }
+    }
 
     // If it's a mock ID from mock data (e.g. BK-894210)
     const mockBooking = INITIAL_BOOKINGS.find(b =>
