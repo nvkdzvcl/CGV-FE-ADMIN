@@ -53,7 +53,7 @@ export default function MovieModal({ movie, onClose, onSave }) {
 
   const [genres, setGenres] = useState([]);
   const [castList, setCastList] = useState([]);
-  const [newCast, setNewCast] = useState({ actorName: '', roleType: 'LEAD', characterName: '', avatarUrl: '', displayOrder: 1 });
+  const [newCast, setNewCast] = useState({ actorName: '', role: 'LEAD', roleType: 'LEAD', characterName: '', avatarUrl: '', displayOrder: 1 });
   const [showCastForm, setShowCastForm] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
@@ -79,7 +79,7 @@ export default function MovieModal({ movie, onClose, onSave }) {
         setCastList(Array.isArray(cast) ? cast : []);
       }).catch(() => {});
     }
-  }, [movie]);
+  }, []);
 
   const handleChange = (field, val) => {
     setFormData(prev => ({ ...prev, [field]: val }));
@@ -119,9 +119,19 @@ export default function MovieModal({ movie, onClose, onSave }) {
   };
 
   const handleAddCast = () => {
-    if (!newCast.actorName.trim()) return;
-    setCastList(prev => [...prev, { ...newCast, id: `temp-${Date.now()}` }]);
-    setNewCast({ actorName: '', roleType: 'LEAD', characterName: '', avatarUrl: '', displayOrder: castList.length + 2 });
+    if (!newCast.actorName?.trim()) return;
+    const roleVal = newCast.roleType || newCast.role || 'LEAD';
+    setCastList(prev => [...prev, {
+      ...newCast,
+      actorName: newCast.actorName.trim(),
+      characterName: newCast.characterName?.trim() || '',
+      role: roleVal,
+      roleType: roleVal,
+      avatarUrl: newCast.avatarUrl?.trim() || '',
+      displayOrder: prev.length + 1,
+      id: `temp-${Date.now()}`
+    }]);
+    setNewCast({ actorName: '', role: 'LEAD', roleType: 'LEAD', characterName: '', avatarUrl: '', displayOrder: castList.length + 2 });
     setShowCastForm(false);
   };
 
@@ -144,19 +154,37 @@ export default function MovieModal({ movie, onClose, onSave }) {
       }
 
       setUploadStep('Đang lưu thông tin phim...');
+
+      // Tự động gộp diễn viên đang nhập dở vào danh sách nếu người dùng quên ấn "Lưu diễn viên"
+      let finalCastList = [...castList];
+      if (newCast.actorName?.trim()) {
+        const roleVal = newCast.roleType || newCast.role || 'LEAD';
+        finalCastList.push({
+          ...newCast,
+          actorName: newCast.actorName.trim(),
+          characterName: newCast.characterName?.trim() || '',
+          role: roleVal,
+          roleType: roleVal,
+          avatarUrl: newCast.avatarUrl?.trim() || '',
+          displayOrder: finalCastList.length + 1,
+          id: `temp-${Date.now()}`
+        });
+      }
+
       const payload = {
         ...formData,
         posterUrl: finalPosterUrl,
         releaseDate: formData.releaseDate ? formData.releaseDate : null,
         endDate: formData.endDate ? formData.endDate : null,
         durationMinutes: Number(formData.durationMinutes || 120),
-        cast: castList.map((c, index) => ({
-          id: c.id && !String(c.id).startsWith('temp-') ? c.id : undefined,
-          actorName: c.actorName,
-          roleType: c.roleType || (c.role === 'DIRECTOR' ? 'DIRECTOR' : 'LEAD'),
-          characterName: c.characterName || '',
-          avatarUrl: c.avatarUrl || '',
-          displayOrder: Number(c.displayOrder || index + 1)
+        cast: finalCastList.map((c, idx) => ({
+          id: c.id,
+          actorName: c.actorName?.trim(),
+          role: c.roleType || c.role || 'LEAD',
+          roleType: c.roleType || c.role || 'LEAD',
+          characterName: c.characterName?.trim() || '',
+          avatarUrl: c.avatarUrl?.trim() || '',
+          displayOrder: Number(c.displayOrder || idx + 1)
         }))
       };
       await onSave(payload);
@@ -393,17 +421,18 @@ export default function MovieModal({ movie, onClose, onSave }) {
                           placeholder="Ngô Thanh Vân" />
                       </div>
                       <div className="form-field">
-                        <label>Vai trò</label>
-                        <select value={newCast.roleType} onChange={e => setNewCast(p => ({ ...p, roleType: e.target.value }))}>
+                        <label>Vai trò *</label>
+                        <select value={newCast.roleType || newCast.role}
+                          onChange={e => setNewCast(p => ({ ...p, role: e.target.value, roleType: e.target.value }))}>
                           {CAST_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                         </select>
                       </div>
                     </div>
                     <div className="form-field">
-                      <label>Tên nhân vật</label>
+                      <label>Tên nhân vật trong phim</label>
                       <input type="text" value={newCast.characterName}
                         onChange={e => setNewCast(p => ({ ...p, characterName: e.target.value }))}
-                        placeholder="Tên nhân vật trong phim" />
+                        placeholder="Ví dụ: Hai Phượng, Iron Man..." />
                     </div>
                     <div className="form-field">
                       <label>Link ảnh đại diện (Avatar URL)</label>
@@ -450,12 +479,19 @@ export default function MovieModal({ movie, onClose, onSave }) {
                         )}
                         <div style={{ flex: 1 }}>
                           <div style={{ fontWeight: 700, color: '#fff', fontSize: '0.9rem' }}>{cast.actorName}</div>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-muted)' }}>
-                            {CAST_ROLES.find(r => r.value === (cast.roleType || cast.role))?.label || cast.roleType || cast.role || 'Diễn viên'} {cast.characterName ? `— "${cast.characterName}"` : ''}
+                          <div style={{ fontSize: '0.78rem', color: 'var(--admin-text-muted)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                            <span style={{
+                              background: 'rgba(239, 68, 68, 0.15)', color: '#f87171',
+                              padding: '1px 7px', borderRadius: 4, fontSize: '0.72rem', fontWeight: 600
+                            }}>
+                              {CAST_ROLES.find(r => r.value === cast.roleType || r.value === cast.role)?.label || cast.roleType || cast.role}
+                            </span>
+                            {cast.characterName && <span>vai <em>"{cast.characterName}"</em></span>}
                           </div>
                         </div>
                         <button type="button" onClick={() => handleRemoveCast(cast.id)}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444' }}>
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', padding: 6 }}
+                          title="Xóa diễn viên">
                           <Trash2 size={15} />
                         </button>
                       </div>

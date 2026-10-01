@@ -412,18 +412,20 @@ export const AdminApi = {
     }
     // Gán diễn viên nếu có
     if (created?.id && Array.isArray(movieData.cast) && movieData.cast.length > 0) {
-      for (const c of movieData.cast) {
+      for (let i = 0; i < movieData.cast.length; i++) {
+        const c = movieData.cast[i];
+        if (!c.actorName?.trim()) continue;
         await adminFetch('/api/v1/catalogs/movie-casts', {
           method: 'POST',
           body: JSON.stringify({
             movieId: created.id,
-            actorName: c.actorName?.trim(),
+            actorName: c.actorName.trim(),
             characterName: c.characterName?.trim() || '',
-            roleType: c.roleType || 'LEAD',
+            roleType: c.roleType || c.role || 'LEAD',
             avatarUrl: c.avatarUrl?.trim() || '',
-            displayOrder: Number(c.displayOrder || 1)
+            displayOrder: Number(c.displayOrder || i + 1)
           })
-        }).catch((err) => console.warn('Lỗi thêm diễn viên:', err));
+        }).catch(err => console.warn('Failed to add cast on movie create:', err));
       }
     }
     realtime.emit(REALTIME_EVENTS.MOVIE_STATUS_CHANGED, {
@@ -463,49 +465,40 @@ export const AdminApi = {
       }).catch(() => {});
     }
 
-    // ─── ĐỒNG BỘ DIỄN VIÊN CHO PHIM KHI CẬP NHẬT ───
+    // ─── ĐỒNG BỘ DIỄN VIÊN KHI CẬP NHẬT PHIM ───
     if (Array.isArray(movieData.cast)) {
       try {
-        const existingCasts = await AdminApi.getMovieCast(movieId);
-        const existingMap = new Map((existingCasts || []).map(c => [c.id, c]));
-        const keptIds = new Set();
+        const existingCasts = await AdminApi.getMovieCast(movieId).catch(() => []);
+        const newCastIds = new Set(movieData.cast.filter(c => c.id && !String(c.id).startsWith('temp-')).map(c => c.id));
 
-        for (const c of movieData.cast) {
-          const isExisting = c.id && !String(c.id).startsWith('temp-') && existingMap.has(c.id);
-          const castPayload = {
-            movieId,
-            actorName: c.actorName?.trim(),
-            characterName: c.characterName?.trim() || '',
-            roleType: c.roleType || 'LEAD',
-            avatarUrl: c.avatarUrl?.trim() || '',
-            displayOrder: Number(c.displayOrder || 1)
-          };
-
-          if (isExisting) {
-            keptIds.add(c.id);
-            await adminFetch(`/api/v1/catalogs/movie-casts/${c.id}`, {
-              method: 'PATCH',
-              body: JSON.stringify(castPayload)
-            }).catch(() => {});
-          } else {
-            const added = await adminFetch('/api/v1/catalogs/movie-casts', {
-              method: 'POST',
-              body: JSON.stringify(castPayload)
-            }).catch(() => {});
-            if (added?.id) keptIds.add(added.id);
+        // 1. Xóa các diễn viên đã bị gỡ bỏ
+        for (const old of existingCasts) {
+          if (!newCastIds.has(old.id)) {
+            await AdminApi.removeCastMember(old.id).catch(err => console.warn('Delete cast error:', err));
           }
         }
 
-        // Xóa những diễn viên đã bị người dùng gỡ bỏ
-        for (const existing of existingCasts) {
-          if (!keptIds.has(existing.id)) {
-            await adminFetch(`/api/v1/catalogs/movie-casts/${existing.id}`, {
-              method: 'DELETE'
-            }).catch(() => {});
+        // 2. Thêm mới hoặc cập nhật từng diễn viên
+        for (let i = 0; i < movieData.cast.length; i++) {
+          const c = movieData.cast[i];
+          if (!c.actorName?.trim()) continue;
+          const castPayload = {
+            movieId,
+            actorName: c.actorName.trim(),
+            characterName: c.characterName?.trim() || '',
+            roleType: c.roleType || c.role || 'LEAD',
+            avatarUrl: c.avatarUrl?.trim() || '',
+            displayOrder: Number(c.displayOrder || i + 1)
+          };
+
+          if (c.id && !String(c.id).startsWith('temp-')) {
+            await AdminApi.updateCastMember(c.id, castPayload).catch(err => console.warn('Update cast error:', err));
+          } else {
+            await AdminApi.addCastMember(movieId, castPayload).catch(err => console.warn('Add cast error:', err));
           }
         }
       } catch (castErr) {
-        console.warn('Lỗi đồng bộ diễn viên:', castErr);
+        console.warn('[updateMovie] Cast sync warning:', castErr);
       }
     }
 
@@ -546,7 +539,17 @@ export const AdminApi = {
   // ─── MOVIE CAST ───
   getMovieCast: async (movieId) => {
     const res = await adminFetch(`/api/v1/catalogs/movie-casts/movie/${movieId}`, {}, []);
-    return Array.isArray(res) ? res : (res?.data || []);
+    const list = Array.isArray(res) ? res : (res?.data || []);
+    return list.map(c => ({
+      id: c.id,
+      movieId: c.movieId,
+      actorName: c.actorName,
+      characterName: c.characterName || '',
+      role: c.roleType || 'LEAD',
+      roleType: c.roleType || 'LEAD',
+      avatarUrl: c.avatarUrl || '',
+      displayOrder: c.displayOrder || 1
+    }));
   },
 
   addCastMember: async (movieId, data) => {
@@ -556,7 +559,7 @@ export const AdminApi = {
         movieId,
         actorName: data.actorName?.trim(),
         characterName: data.characterName?.trim() || '',
-        roleType: data.roleType || 'LEAD',
+        roleType: data.roleType || data.role || 'LEAD',
         avatarUrl: data.avatarUrl?.trim() || '',
         displayOrder: Number(data.displayOrder || 1)
       })
@@ -567,9 +570,10 @@ export const AdminApi = {
     return await adminFetch(`/api/v1/catalogs/movie-casts/${castId}`, {
       method: 'PATCH',
       body: JSON.stringify({
+        movieId: data.movieId,
         actorName: data.actorName?.trim(),
         characterName: data.characterName?.trim() || '',
-        roleType: data.roleType || 'LEAD',
+        roleType: data.roleType || data.role || 'LEAD',
         avatarUrl: data.avatarUrl?.trim() || '',
         displayOrder: Number(data.displayOrder || 1)
       })
