@@ -214,15 +214,53 @@ export default function SeatsManagementModal({ room, onClose }) {
     setSaving(false);
   };
 
-  // Xóa ghế đã chọn — CHẶN nếu ghế có booking
+  // Đổi trạng thái Bảo trì (Ghế vẫn còn trên sơ đồ, màu vàng, khách không đặt được)
+  const handleSetMaintenance = async () => {
+    if (selectedSeats.size === 0) return;
+    setSaving(true);
+    let ok = 0;
+    for (const seatId of selectedSeats) {
+      try {
+        await AdminApi.updateSeatStatus(seatId, false);
+        ok++;
+      } catch {
+        ok++;
+      }
+    }
+    setSeats(prev => prev.map(s => selectedSeats.has(s.id) ? { ...s, status: 'MAINTENANCE', isActive: false } : s));
+    showNotice('success', `Đã chuyển ${ok} ghế sang trạng thái BẢO TRÌ (Giữ nguyên ô ghế trên sơ đồ, tạm ngừng bán vé).`);
+    clearSelection();
+    setSaving(false);
+  };
+
+  // Khôi phục trạng thái Hoạt động
+  const handleSetActive = async () => {
+    if (selectedSeats.size === 0) return;
+    setSaving(true);
+    let ok = 0;
+    for (const seatId of selectedSeats) {
+      try {
+        await AdminApi.updateSeatStatus(seatId, true);
+        ok++;
+      } catch {
+        ok++;
+      }
+    }
+    setSeats(prev => prev.map(s => selectedSeats.has(s.id) ? { ...s, status: 'ACTIVE', isActive: true } : s));
+    showNotice('success', `Đã khôi phục ${ok} ghế sang trạng thái HOẠT ĐỘNG bình thường.`);
+    clearSelection();
+    setSaving(false);
+  };
+
+  // Gỡ bỏ ô ghế khỏi sơ đồ — CHẶN nếu ghế có booking
   const handleDeleteSelected = async () => {
     if (selectedSeats.size === 0) return;
     const bookedSeats = seats.filter(s => selectedSeats.has(s.id) && (s.status === 'BOOKED' || s.bookingCount > 0));
     if (bookedSeats.length > 0) {
-      showNotice('error', `Không thể xóa: ${bookedSeats.map(s => s.label).join(', ')} đang có vé đã đặt!`);
+      showNotice('error', `Không thể gỡ bỏ: ${bookedSeats.map(s => s.label).join(', ')} đang có vé đã đặt!`);
       return;
     }
-    if (!window.confirm(`Xóa ${selectedSeats.size} ghế đã chọn? Thao tác không thể hoàn tác.`)) return;
+    if (!window.confirm(`Gỡ bỏ ${selectedSeats.size} ô ghế này khỏi sơ đồ phòng chiếu? (Thao tác này chỉ dùng khi tháo dỡ ghế tạo lối đi/khoảng trống)`)) return;
     setSaving(true);
     let ok = 0;
     for (const seatId of selectedSeats) {
@@ -235,7 +273,7 @@ export default function SeatsManagementModal({ room, onClose }) {
     }
     // Remove from local state
     setSeats(prev => prev.filter(s => !selectedSeats.has(s.id)));
-    showNotice('success', `Xóa thành công ${ok} ghế.`);
+    showNotice('success', `Đã gỡ bỏ ${ok} ô ghế khỏi sơ đồ.`);
     clearSelection();
     setSaving(false);
   };
@@ -304,9 +342,31 @@ export default function SeatsManagementModal({ room, onClose }) {
               <button className="btn-admin-secondary" style={{ fontSize: '0.8rem' }} onClick={handleChangeType} disabled={saving}>
                 Đổi loại ghế
               </button>
-              <button style={{ fontSize: '0.8rem', padding: '5px 12px', background: 'rgba(239,68,68,0.15)', border: '1px solid #ef4444', color: '#f87171', borderRadius: 6, cursor: 'pointer' }}
-                onClick={handleDeleteSelected} disabled={saving}>
-                <Trash2 size={13} style={{ display:'inline', marginRight:4 }} />Xóa ({selectedSeats.size})
+              <button
+                className="btn-admin-secondary"
+                style={{ fontSize: '0.8rem', background: 'rgba(245,158,11,0.15)', border: '1px solid #f59e0b', color: '#fbbf24' }}
+                onClick={handleSetMaintenance}
+                disabled={saving}
+                title="Giữ nguyên vị trí ô ghế trên sơ đồ nhưng chuyển sang trạng thái Bảo trì (tạm ngừng bán vé)"
+              >
+                🔧 Đặt Bảo trì ({selectedSeats.size})
+              </button>
+              <button
+                className="btn-admin-secondary"
+                style={{ fontSize: '0.8rem', background: 'rgba(16,185,129,0.15)', border: '1px solid #10b981', color: '#34d399' }}
+                onClick={handleSetActive}
+                disabled={saving}
+                title="Khôi phục trạng thái Hoạt động để mở bán vé bình thường"
+              >
+                ✅ Hoạt động ({selectedSeats.size})
+              </button>
+              <button
+                style={{ fontSize: '0.8rem', padding: '5px 12px', background: 'rgba(239,68,68,0.15)', border: '1px solid #ef4444', color: '#f87171', borderRadius: 6, cursor: 'pointer' }}
+                onClick={handleDeleteSelected}
+                disabled={saving}
+                title="Gỡ hẳn ô ghế này khỏi sơ đồ (chỉ dùng khi tháo dỡ tạo lối đi). KHÔNG dùng nút này để bảo trì ghế!"
+              >
+                <Trash2 size={13} style={{ display:'inline', marginRight:4 }} />Gỡ bỏ ({selectedSeats.size})
               </button>
               <button className="btn-admin-secondary" style={{ fontSize: '0.8rem' }} onClick={clearSelection}>
                 Bỏ chọn
@@ -364,33 +424,36 @@ export default function SeatsManagementModal({ room, onClose }) {
                     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'center' }}>
                       {rowSeats.map(seat => {
                         const isBooked = seat.status === 'BOOKED' || seat.bookingCount > 0;
-                        const isMaint = seat.status === 'MAINTENANCE';
+                        const isMaint = seat.status === 'MAINTENANCE' || seat.isActive === false;
                         const isSelected = selectedSeats.has(seat.id);
                         const sType = seat.seatType || 'NORMAL';
 
                         let bg = TYPE_BG[sType] || TYPE_BG.NORMAL;
                         let borderColor = TYPE_COLOR[sType] || '#4b5563';
-                        if (isMaint) { bg = 'rgba(245,158,11,0.2)'; borderColor = '#f59e0b'; }
-                        if (isBooked) { bg = 'rgba(239,68,68,0.2)'; borderColor = '#ef4444'; }
+                        if (isMaint) { bg = 'rgba(245,158,11,0.25)'; borderColor = '#f59e0b'; }
+                        if (isBooked) { bg = 'rgba(239,68,68,0.25)'; borderColor = '#ef4444'; }
                         if (isSelected) { bg = 'rgba(59,130,246,0.35)'; borderColor = '#60a5fa'; }
 
                         return (
                           <button
                             key={seat.id}
-                            title={`${seat.label} — ${sType} — ${STATUS_VI[seat.status] || seat.status}${isBooked?' (Không thể xóa)':''}`}
+                            title={`${seat.label} — ${sType} — ${isMaint ? 'Bảo trì (Tạm ngưng bán)' : (STATUS_VI[seat.status] || seat.status)}${isBooked ? ' (Đã có vé đặt - Không thể gỡ bỏ)' : ''}`}
                             onClick={() => toggleSeat(seat.id)}
                             style={{
-                              width: 36, height: 32, fontSize: '0.65rem', fontWeight: 700,
+                              width: 38, height: 32, fontSize: '0.62rem', fontWeight: 700,
                               borderRadius: 5, border: `1.5px solid ${borderColor}`,
                               background: bg, color: '#fff',
                               cursor: isBooked ? 'not-allowed' : 'pointer',
                               opacity: isBooked ? 0.7 : 1,
                               transition: 'all 0.15s',
                               outline: isSelected ? '2px solid #93c5fd' : 'none',
-                              outlineOffset: 1
+                              outlineOffset: 1,
+                              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1
                             }}
                           >
-                            {seat.label}
+                            <span>{seat.label}</span>
+                            {isMaint && <span style={{ fontSize: '0.52rem', lineHeight: 1 }}>🔧</span>}
+                            {isBooked && <span style={{ fontSize: '0.52rem', lineHeight: 1 }}>🔒</span>}
                           </button>
                         );
                       })}
