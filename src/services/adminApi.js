@@ -785,7 +785,37 @@ export const AdminApi = {
   },
 
   verifyTicketQr: async (ticketCode) => {
+    if (!ticketCode || !ticketCode.trim()) {
+      return { valid: false, message: 'Mã vé không được để trống.' };
+    }
     const cleanId = AdminApi.extractUuid(ticketCode);
+    const isStandardUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(cleanId);
+
+    // If it's a mock ID from mock data (e.g. BK-894210)
+    const mockBooking = INITIAL_BOOKINGS.find(b =>
+      b.id.toUpperCase() === cleanId.toUpperCase() ||
+      b.id.toUpperCase() === ticketCode.trim().toUpperCase()
+    );
+
+    if (!isStandardUuid && mockBooking) {
+      if (mockBooking.checkinStatus === 'CHECKED_IN') {
+        return { valid: false, code: cleanId, message: 'Vé này đã được quét sử dụng trước đó!' };
+      }
+      mockBooking.checkinStatus = 'CHECKED_IN';
+      return {
+        valid: true,
+        booking: {
+          id: mockBooking.id,
+          movieTitle: mockBooking.movieTitle,
+          cinemaName: mockBooking.cinemaName,
+          roomName: mockBooking.roomName,
+          seats: Array.isArray(mockBooking.seats) ? mockBooking.seats : [mockBooking.seats],
+          userEmail: mockBooking.userEmail
+        },
+        message: 'Soát vé thành công! Cho phép khách vào phòng chiếu.'
+      };
+    }
+
     try {
       const res = await AdminApi.adminCheckIn(cleanId);
       return {
@@ -795,24 +825,29 @@ export const AdminApi = {
           movieTitle: res.movieTitle || 'Phim chiếu rạp CGV',
           cinemaName: res.cinemaName || 'CGV Cinema',
           roomName: res.roomName || 'Phòng chiếu',
-          seats: res.seatLabels || (res.seats ? res.seats.map(s => s.label || s) : ['Vé vào cửa']),
+          seats: res.seatLabels || (res.seats ? res.seats.map(s => s.label || s.seatNumber || s) : ['Vé vào cửa']),
           userEmail: res.guestEmail || res.userId || 'khach@cgv.vn'
         },
-        message: 'Xác thực vé QR thành công! Trạng thái vé đã chuyển sang ĐÃ SỬ DỤNG.'
+        message: 'Soát vé QR thành công! Vé đã chuyển sang trạng thái ĐÃ SỬ DỤNG.'
       };
     } catch (err) {
-      const booking = INITIAL_BOOKINGS.find(b =>
-        b.id.toUpperCase() === cleanId.toUpperCase() ||
-        b.id.toUpperCase() === ticketCode.trim().toUpperCase()
-      );
-      if (booking) {
-        if (booking.checkinStatus === 'CHECKED_IN') {
-          return { valid: false, message: 'Vé đã được quét sử dụng trước đó!' };
+      if (mockBooking) {
+        if (mockBooking.checkinStatus === 'CHECKED_IN') {
+          return { valid: false, code: cleanId, message: 'Vé này đã được quét sử dụng trước đó!' };
         }
-        booking.checkinStatus = 'CHECKED_IN';
-        return { valid: true, booking, message: 'Xác thực vé thành công! Cho phép vào phòng chiếu.' };
+        mockBooking.checkinStatus = 'CHECKED_IN';
+        return { valid: true, booking: mockBooking, message: 'Soát vé thành công! Cho phép vào phòng chiếu.' };
       }
-      return { valid: false, message: err.message || 'Mã vé không tồn tại hoặc đã bị hủy/hoàn vé.' };
+
+      let errorMsg = err.message || 'Mã vé không tồn tại hoặc đã bị hủy/hoàn vé.';
+      if (errorMsg.includes('UUID string too large') || (errorMsg.includes('Failed to convert') && errorMsg.includes('UUID'))) {
+        errorMsg = 'Mã QR không đúng định dạng mã vé của rạp CGV.';
+      }
+      return {
+        valid: false,
+        code: cleanId || ticketCode.trim(),
+        message: errorMsg
+      };
     }
   },
 

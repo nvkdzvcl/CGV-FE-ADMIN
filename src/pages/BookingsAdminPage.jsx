@@ -633,9 +633,13 @@ export default function BookingsAdminPage() {
         <QrScannerModal
           isOpen={isQrModalOpen}
           onClose={() => setIsQrModalOpen(false)}
-          onSuccessCheckIn={(bookingId) => {
+          onSuccessCheckIn={(bookingId, verifyResult) => {
             setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, checkinStatus: 'CHECKED_IN', rawStatus: 'USED', status: 'USED' } : b));
-            showNotice('success', `Đã quét QR và duyệt soát vé cho đơn #${bookingId}`);
+            const seatStr = verifyResult?.booking?.seats ? (Array.isArray(verifyResult.booking.seats) ? verifyResult.booking.seats.join(', ') : verifyResult.booking.seats) : '';
+            showNotice('success', `Đã quét QR và duyệt soát vé thành công: Đơn #${bookingId}${seatStr ? ` (Ghế: ${seatStr})` : ''}`);
+          }}
+          onErrorCheckIn={(errorMsg, code) => {
+            showNotice('error', `Soát vé thất bại: ${errorMsg}`);
           }}
         />
       )}
