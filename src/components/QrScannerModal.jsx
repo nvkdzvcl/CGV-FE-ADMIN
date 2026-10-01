@@ -1,215 +1,54 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, QrCode, CheckCircle, AlertCircle, Camera, CameraOff, Keyboard, RefreshCw, Video } from 'lucide-react';
-import jsQR from 'jsqr';
+import { X, QrCode, CheckCircle, AlertCircle, Camera, CameraOff, Keyboard, RefreshCw, Upload, Video, Image as ImageIcon } from 'lucide-react';
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { AdminApi } from '../services/adminApi';
 
 export default function QrScannerModal({ onClose, onSuccessCheckIn }) {
   const [ticketCode, setTicketCode] = useState('');
   const [verifyResult, setVerifyResult] = useState(null);
-  const [mode, setMode] = useState('camera'); // 'camera' | 'manual'
+  const [mode, setMode] = useState('camera'); // 'camera' | 'upload' | 'manual'
   const [cameraLoading, setCameraLoading] = useState(false);
+  const [fileScanning, setFileScanning] = useState(false);
   const [cameraError, setCameraError] = useState(null);
-  const [scanning, setScanning] = useState(false);
-  const [stream, setStream] = useState(null);
   const [devices, setDevices] = useState([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
 
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
-  const intervalRef = useRef(null);
-  const canvasRef = useRef(null);
+  const scannerRef = useRef(null);
+  const isScanningRef = useRef(false);
+  const fileInputRef = useRef(null);
 
-  // Stop camera helper
-  const stopCamera = useCallback(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
+  // Stop scanner helper
+  const stopScanner = useCallback(async () => {
+    if (scannerRef.current) {
+      try {
+        if (isScanningRef.current) {
+          isScanningRef.current = false;
+          await scannerRef.current.stop();
+        }
+        await scannerRef.current.clear();
+      } catch (err) {
+        console.warn('[stopScanner error]', err);
+      }
+      scannerRef.current = null;
     }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
-    }
-    setStream(null);
-    setScanning(false);
+    setCameraLoading(false);
   }, []);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      stopCamera();
+      stopScanner();
     };
-  }, [stopCamera]);
+  }, [stopScanner]);
 
-  // Start QR scanning loop using BarcodeDetector + jsQR fallback
-  const startQrScan = useCallback(() => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    setScanning(true);
-    let detected = false;
-
-    let barcodeDetector = null;
-    if ('BarcodeDetector' in window) {
-      try {
-        barcodeDetector = new window.BarcodeDetector({ formats: ['qr_code'] });
-      } catch {
-        barcodeDetector = null;
-      }
-    }
-
-    intervalRef.current = setInterval(async () => {
-      if (detected) return;
-      const video = videoRef.current;
-      if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
-
-      // 1. Try native BarcodeDetector if available
-      if (barcodeDetector) {
-        try {
-          const barcodes = await barcodeDetector.detect(video);
-          if (barcodes && barcodes.length > 0) {
-            const rawVal = barcodes[0].rawValue;
-            if (rawVal) {
-              detected = true;
-              clearInterval(intervalRef.current);
-              setScanning(false);
-              setTicketCode(rawVal);
-              await handleVerifyCode(rawVal);
-              return;
-            }
-          }
-        } catch {
-          // fall through to jsQR
-        }
-      }
-
-      // 2. Fallback to jsQR canvas decode
-      try {
-        const canvas = canvasRef.current || document.createElement('canvas');
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
-        if (ctx) {
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const code = jsQR(imageData.data, imageData.width, imageData.height, {
-            inversionAttempts: 'dontInvert'
-          });
-          if (code && code.data) {
-            detected = true;
-            clearInterval(intervalRef.current);
-            setScanning(false);
-            setTicketCode(code.data);
-            await handleVerifyCode(code.data);
-            return;
-          }
-        }
-      } catch {
-        // ignore frame decoding errors
-      }
-    }, 200);
-  }, []);
-
-  // Start Camera with deviceId selection & resilient constraints
-  const startCamera = useCallback(async (targetDeviceId = null) => {
-    setCameraError(null);
-    setVerifyResult(null);
-    setCameraLoading(true);
-
-    // Stop current stream before requesting new one
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
-    }
-
-    try {
-      let constraints;
-      if (targetDeviceId) {
-        constraints = {
-          video: {
-            deviceId: { exact: targetDeviceId },
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          }
-        };
-      } else {
-        // Ideal constraint for desktop/laptop/mobile
-        constraints = {
-          video: {
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            facingMode: { ideal: 'environment' }
-          }
-        };
-      }
-
-      let activeStream;
-      try {
-        activeStream = await navigator.mediaDevices.getUserMedia(constraints);
-      } catch (err1) {
-        console.warn('Ideal camera constraints failed, attempting fallback to basic video:', err1);
-        activeStream = await navigator.mediaDevices.getUserMedia({ video: true });
-      }
-
-      streamRef.current = activeStream;
-      setStream(activeStream);
-
-      // Enumerate devices so user can pick between FaceTime, iPhone Continuity, or USB Cam
-      try {
-        const allDevices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevs = allDevices.filter(d => d.kind === 'videoinput');
-        setDevices(videoDevs);
-        const activeTrack = activeStream.getVideoTracks()[0];
-        const currentId = activeTrack?.getSettings()?.deviceId || (videoDevs[0]?.deviceId || '');
-        setSelectedDeviceId(targetDeviceId || currentId);
-      } catch (enumErr) {
-        console.warn('Enumerate devices failed:', enumErr);
-      }
-
-      setMode('camera');
-      setCameraLoading(false);
-      startQrScan();
-    } catch (err) {
-      console.error('Camera open failed:', err);
-      setCameraLoading(false);
-      setCameraError('Không thể mở camera: ' + err.message + '. Vui lòng kiểm tra quyền camera của trình duyệt.');
-      setMode('manual');
-    }
-  }, [startQrScan]);
-
-  // Ensure stream is properly attached to video element on mount & mode changes
-  useEffect(() => {
-    if (mode === 'camera' && videoRef.current && streamRef.current) {
-      const video = videoRef.current;
-      if (video.srcObject !== streamRef.current) {
-        video.srcObject = streamRef.current;
-      }
-      video.play().catch(err => {
-        console.warn('Video auto-play interrupted:', err);
-      });
-    }
-  }, [stream, mode]);
-
-  // Auto-start camera when modal opens
-  useEffect(() => {
-    startCamera();
-  }, []);
-
-  const handleDeviceChange = (e) => {
-    const devId = e.target.value;
-    setSelectedDeviceId(devId);
-    startCamera(devId);
-  };
-
-  const switchToManual = () => {
-    stopCamera();
-    setMode('manual');
-  };
-
-  const handleVerifyCode = async (code) => {
+  // Handle successful code decode
+  const handleVerifyCode = useCallback(async (code) => {
     if (!code?.trim()) return;
     try {
       const res = await AdminApi.verifyTicketQr(code.trim());
       setVerifyResult(res);
       if (res.valid) {
-        stopCamera();
+        await stopScanner();
         if (typeof onSuccessCheckIn === 'function') {
           onSuccessCheckIn(res.booking?.id || code.trim());
         }
@@ -219,6 +58,148 @@ export default function QrScannerModal({ onClose, onSuccessCheckIn }) {
         valid: false,
         message: err.message || 'Mã vé không hợp lệ hoặc đã qua sử dụng.'
       });
+    }
+  }, [stopScanner, onSuccessCheckIn]);
+
+  // Start Html5Qrcode scanner
+  const startScanner = useCallback(async (targetDeviceId = null) => {
+    await stopScanner();
+    setCameraError(null);
+    setVerifyResult(null);
+    setCameraLoading(true);
+    setMode('camera');
+
+    // Give DOM a small tick to ensure #cgv-qr-reader exists
+    setTimeout(async () => {
+      const container = document.getElementById('cgv-qr-reader');
+      if (!container) {
+        setCameraLoading(false);
+        return;
+      }
+
+      try {
+        const html5QrCode = new Html5Qrcode('cgv-qr-reader', {
+          formatsToSupport: [
+            Html5QrcodeSupportedFormats.QR_CODE,
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.CODE_39,
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.EAN_8,
+            Html5QrcodeSupportedFormats.PDF_417,
+            Html5QrcodeSupportedFormats.DATA_MATRIX,
+          ],
+          verbose: false
+        });
+        scannerRef.current = html5QrCode;
+
+        // Fetch available camera devices
+        const cams = await Html5Qrcode.getCameras().catch(() => []);
+        setDevices(cams);
+
+        let cameraConfig;
+        if (targetDeviceId) {
+          cameraConfig = { deviceId: { exact: targetDeviceId } };
+          setSelectedDeviceId(targetDeviceId);
+        } else if (cams.length > 0) {
+          cameraConfig = cams[0].id;
+          setSelectedDeviceId(cams[0].id);
+        } else {
+          cameraConfig = { facingMode: 'environment' };
+        }
+
+        await html5QrCode.start(
+          cameraConfig,
+          {
+            fps: 15,
+            qrbox: (viewWidth, viewHeight) => {
+              const minDim = Math.min(viewWidth, viewHeight);
+              return {
+                width: Math.min(320, Math.floor(minDim * 0.85)),
+                height: Math.min(260, Math.floor(minDim * 0.75))
+              };
+            },
+            aspectRatio: 1.333333
+          },
+          async (decodedText) => {
+            if (decodedText) {
+              setTicketCode(decodedText);
+              await stopScanner();
+              await handleVerifyCode(decodedText);
+            }
+          },
+          () => {
+            // Frame search failure, normal while scanning
+          }
+        );
+
+        isScanningRef.current = true;
+        setCameraLoading(false);
+      } catch (err) {
+        console.error('Camera scan failed to start:', err);
+        setCameraLoading(false);
+        isScanningRef.current = false;
+        setCameraError(
+          'Không thể khởi động camera: ' + (err.message || err) +
+          '. Vui lòng kiểm tra quyền camera hoặc dùng tính năng tải ảnh / nhập mã.'
+        );
+      }
+    }, 100);
+  }, [stopScanner, handleVerifyCode]);
+
+  // Start camera on mount
+  useEffect(() => {
+    startScanner();
+  }, [startScanner]);
+
+  const handleDeviceChange = (e) => {
+    const devId = e.target.value;
+    setSelectedDeviceId(devId);
+    startScanner(devId);
+  };
+
+  // Scan from uploaded file / photo
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setFileScanning(true);
+    setCameraError(null);
+    setVerifyResult(null);
+
+    try {
+      const dummyId = 'cgv-qr-file-dummy';
+      let dummyContainer = document.getElementById(dummyId);
+      if (!dummyContainer) {
+        dummyContainer = document.createElement('div');
+        dummyContainer.id = dummyId;
+        dummyContainer.style.display = 'none';
+        document.body.appendChild(dummyContainer);
+      }
+
+      const fileScanner = new Html5Qrcode(dummyId, {
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.QR_CODE,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.PDF_417,
+        ],
+        verbose: false
+      });
+
+      const decodedText = await fileScanner.scanFile(file, true);
+      await fileScanner.clear();
+
+      if (decodedText) {
+        setTicketCode(decodedText);
+        await handleVerifyCode(decodedText);
+      }
+    } catch (err) {
+      setCameraError('Không tìm thấy mã QR hoặc Barcode rõ ràng trong ảnh này. Vui lòng thử ảnh chụp nét hơn hoặc nhập mã tay.');
+    } finally {
+      setFileScanning(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -232,7 +213,7 @@ export default function QrScannerModal({ onClose, onSuccessCheckIn }) {
     setVerifyResult(null);
     setTicketCode('');
     if (mode === 'camera') {
-      startCamera(selectedDeviceId);
+      startScanner(selectedDeviceId);
     }
   };
 
@@ -258,7 +239,7 @@ export default function QrScannerModal({ onClose, onSuccessCheckIn }) {
             Soát Vé Quầy & Quét QR Code
           </h3>
           <button
-            onClick={() => { stopCamera(); onClose(); }}
+            onClick={() => { stopScanner(); onClose(); }}
             style={{ color: 'var(--admin-text-muted)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 4, borderRadius: 6 }}
           >
             <X size={20} />
@@ -267,47 +248,59 @@ export default function QrScannerModal({ onClose, onSuccessCheckIn }) {
 
         <div className="modal-admin-body" style={{ padding: 20 }}>
           {/* Mode Switcher */}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 14 }}>
             <button
               type="button"
               className={mode === 'camera' ? 'btn-admin-primary' : 'btn-admin-secondary'}
               style={{
-                flex: 1,
-                fontSize: '0.84rem',
-                padding: '8px 14px',
-                background: mode === 'camera' ? 'linear-gradient(135deg, #e11d48, #be123c)' : undefined
+                fontSize: '0.82rem',
+                padding: '8px 10px',
+                background: mode === 'camera' ? 'linear-gradient(135deg, #e11d48, #be123c)' : undefined,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
               }}
               onClick={() => {
-                if (mode === 'camera') {
-                  stopCamera();
-                  setMode('manual');
-                } else {
-                  startCamera(selectedDeviceId);
+                if (mode !== 'camera') {
+                  startScanner(selectedDeviceId);
                 }
               }}
             >
-              {mode === 'camera' && stream ? (
-                <><CameraOff size={15} /> Dừng Camera</>
-              ) : (
-                <><Camera size={15} /> Bật Camera Quét QR</>
-              )}
+              <Camera size={14} /> Camera Quét
+            </button>
+            <button
+              type="button"
+              className={mode === 'upload' ? 'btn-admin-primary' : 'btn-admin-secondary'}
+              style={{
+                fontSize: '0.82rem',
+                padding: '8px 10px',
+                background: mode === 'upload' ? 'linear-gradient(135deg, #e11d48, #be123c)' : undefined,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
+              }}
+              onClick={() => {
+                stopScanner();
+                setMode('upload');
+              }}
+            >
+              <Upload size={14} /> Tải Ảnh Vé
             </button>
             <button
               type="button"
               className={mode === 'manual' ? 'btn-admin-primary' : 'btn-admin-secondary'}
               style={{
-                flex: 1,
-                fontSize: '0.84rem',
-                padding: '8px 14px',
-                background: mode === 'manual' ? 'linear-gradient(135deg, #e11d48, #be123c)' : undefined
+                fontSize: '0.82rem',
+                padding: '8px 10px',
+                background: mode === 'manual' ? 'linear-gradient(135deg, #e11d48, #be123c)' : undefined,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
               }}
-              onClick={switchToManual}
+              onClick={() => {
+                stopScanner();
+                setMode('manual');
+              }}
             >
-              <Keyboard size={15} /> Nhập Mã Thủ Công
+              <Keyboard size={14} /> Nhập Mã Tay
             </button>
           </div>
 
-          {/* Camera Device Selector (if multiple cameras available) */}
+          {/* Camera Device Selector (if multiple cameras detected) */}
           {mode === 'camera' && devices.length > 1 && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, padding: '6px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)' }}>
               <Video size={14} color="#94a3b8" />
@@ -326,7 +319,7 @@ export default function QrScannerModal({ onClose, onSuccessCheckIn }) {
                 }}
               >
                 {devices.map((d, idx) => (
-                  <option key={d.deviceId || idx} value={d.deviceId} style={{ background: '#1e293b', color: '#fff' }}>
+                  <option key={d.id || idx} value={d.id} style={{ background: '#1e293b', color: '#fff' }}>
                     {d.label || `Camera ${idx + 1}`}
                   </option>
                 ))}
@@ -346,111 +339,69 @@ export default function QrScannerModal({ onClose, onSuccessCheckIn }) {
             </div>
           )}
 
-          {/* Camera Live Viewfinder */}
-          {mode === 'camera' && (
+          {/* Camera Viewfinder Container */}
+          <div style={{ display: mode === 'camera' ? 'block' : 'none', marginBottom: 14 }}>
             <div style={{
               position: 'relative',
               borderRadius: 12,
               overflow: 'hidden',
               border: '2px solid rgba(225, 29, 72, 0.6)',
-              marginBottom: 14,
               background: '#070b13',
-              height: 280,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
+              minHeight: 260
             }}>
               {cameraLoading && (
-                <div style={{ position: 'absolute', zIndex: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, color: '#94a3b8', fontSize: '0.82rem' }}>
-                  <RefreshCw size={24} className="spin" color="#f43f5e" />
-                  <span>Đang kết nối camera...</span>
+                <div style={{ position: 'absolute', inset: 0, zIndex: 10, background: '#070b13', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: '#94a3b8', fontSize: '0.82rem' }}>
+                  <RefreshCw size={26} className="spin" color="#f43f5e" />
+                  <span>Đang khởi động camera quét QR & Barcode...</span>
                 </div>
               )}
 
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                onLoadedMetadata={() => {
-                  videoRef.current?.play().catch(() => {});
-                }}
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'cover',
-                  display: 'block'
-                }}
+              {/* Html5Qrcode target element */}
+              <div id="cgv-qr-reader" style={{ width: '100%' }} />
+            </div>
+
+            <div style={{ textAlign: 'center', marginTop: 8, fontSize: '0.74rem', color: '#94a3b8' }}>
+              💡 Giữ vé cách camera khoảng 15-25cm, hướng mã QR hoặc mã vạch vào giữa khung đỏ
+            </div>
+          </div>
+
+          {/* Upload Photo Mode */}
+          {mode === 'upload' && (
+            <div style={{
+              background: '#070b13',
+              border: '2px dashed rgba(225, 29, 72, 0.4)',
+              borderRadius: 12,
+              padding: '30px 20px',
+              textAlign: 'center',
+              marginBottom: 14,
+              cursor: 'pointer'
+            }}
+            onClick={() => fileInputRef.current?.click()}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={handleFileUpload}
               />
-              <canvas ref={canvasRef} style={{ display: 'none' }} />
-
-              {/* Laser Target Box Overlay */}
-              <div
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  pointerEvents: 'none'
-                }}
-              >
-                <div
-                  style={{
-                    width: 170,
-                    height: 170,
-                    position: 'relative',
-                    borderRadius: 12,
-                    border: '2px solid rgba(225, 29, 72, 0.4)',
-                    boxShadow: '0 0 20px rgba(225, 29, 72, 0.25)'
-                  }}
-                >
-                  {/* 4 Corner Markers */}
-                  <span style={{ position: 'absolute', top: -2, left: -2, width: 16, height: 16, borderTop: '3px solid #f43f5e', borderLeft: '3px solid #f43f5e', borderTopLeftRadius: 6 }} />
-                  <span style={{ position: 'absolute', top: -2, right: -2, width: 16, height: 16, borderTop: '3px solid #f43f5e', borderRight: '3px solid #f43f5e', borderTopRightRadius: 6 }} />
-                  <span style={{ position: 'absolute', bottom: -2, left: -2, width: 16, height: 16, borderBottom: '3px solid #f43f5e', borderLeft: '3px solid #f43f5e', borderBottomLeftRadius: 6 }} />
-                  <span style={{ position: 'absolute', bottom: -2, right: -2, width: 16, height: 16, borderBottom: '3px solid #f43f5e', borderRight: '3px solid #f43f5e', borderBottomRightRadius: 6 }} />
-
-                  {/* Scanning Laser Line */}
-                  {scanning && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        left: 4,
-                        right: 4,
-                        height: 2,
-                        background: 'linear-gradient(90deg, transparent, #f43f5e, #fda4af, #f43f5e, transparent)',
-                        boxShadow: '0 0 8px #f43f5e',
-                        animation: 'scanLaser 2s ease-in-out infinite'
-                      }}
-                    />
-                  )}
-                </div>
+              <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'rgba(225, 29, 72, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px', color: '#f43f5e' }}>
+                <ImageIcon size={24} />
               </div>
-
-              {/* Status Badge */}
-              <div
-                style={{
-                  position: 'absolute',
-                  bottom: 12,
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  background: 'rgba(15, 23, 42, 0.85)',
-                  backdropFilter: 'blur(4px)',
-                  color: scanning ? '#34d399' : '#94a3b8',
-                  padding: '4px 14px',
-                  borderRadius: 20,
-                  fontSize: '0.74rem',
-                  fontWeight: 600,
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6
-                }}
-              >
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: scanning ? '#10b981' : '#64748b' }} />
-                {scanning ? 'Đang căn quét mã QR...' : 'Tạm dừng quét'}
+              <div style={{ color: '#fff', fontSize: '0.92rem', fontWeight: 600 }}>
+                {fileScanning ? 'Đang phân tích hình ảnh vé...' : 'Chọn hoặc thả ảnh vé chứa mã QR / Barcode'}
               </div>
+              <div style={{ fontSize: '0.76rem', color: 'var(--admin-text-muted)', marginTop: 4 }}>
+                Hỗ trợ ảnh chụp màn hình, ảnh vé PDF, vé điện tử JPG / PNG
+              </div>
+              <button
+                type="button"
+                className="btn-admin-secondary"
+                style={{ marginTop: 14, fontSize: '0.8rem', padding: '6px 16px' }}
+                disabled={fileScanning}
+              >
+                {fileScanning ? 'Đang quét...' : 'Chọn file ảnh'}
+              </button>
             </div>
           )}
 
@@ -471,7 +422,7 @@ export default function QrScannerModal({ onClose, onSuccessCheckIn }) {
                 Nhập mã vé hoặc mã đặt chỗ bên dưới
               </div>
               <div style={{ fontSize: '0.76rem', color: 'var(--admin-text-muted)', marginTop: 4 }}>
-                Hoặc bấm "Bật Camera" để quét trực tiếp mã QR trên vé khách hàng
+                Hệ thống sẽ tự động tra cứu và đổi trạng thái vé sang ĐÃ CHECK-IN
               </div>
             </div>
           )}
@@ -543,7 +494,7 @@ export default function QrScannerModal({ onClose, onSuccessCheckIn }) {
           <button
             type="button"
             className="btn-admin-secondary"
-            onClick={() => { stopCamera(); onClose(); }}
+            onClick={() => { stopScanner(); onClose(); }}
             style={{ fontSize: '0.84rem' }}
           >
             Đóng cửa sổ
@@ -551,12 +502,26 @@ export default function QrScannerModal({ onClose, onSuccessCheckIn }) {
         </div>
       </div>
 
-      {/* Laser Animation Style */}
+      {/* Override html5-qrcode internal styles to look stunning & native */}
       <style>{`
-        @keyframes scanLaser {
-          0% { top: 6px; }
-          50% { top: calc(100% - 8px); }
-          100% { top: 6px; }
+        #cgv-qr-reader {
+          border: none !important;
+        }
+        #cgv-qr-reader video {
+          border-radius: 10px !important;
+          object-fit: cover !important;
+          max-height: 280px !important;
+        }
+        #cgv-qr-reader img {
+          display: none !important;
+        }
+        #cgv-qr-reader__scan_region {
+          border: 2px solid rgba(225, 29, 72, 0.7) !important;
+          border-radius: 12px !important;
+          box-shadow: 0 0 15px rgba(225, 29, 72, 0.3) !important;
+        }
+        #cgv-qr-reader__dashboard {
+          display: none !important;
         }
       `}</style>
     </div>
