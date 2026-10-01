@@ -544,6 +544,10 @@ function RoomModal({ room, cinemaId, onClose, onSave }) {
   const vipCount = generatedSeats.filter(s => s.seatType === 'VIP').length;
   const sweetboxCount = generatedSeats.filter(s => s.seatType === 'SWEETBOX').length;
 
+  // Calculate dynamic seat dimensions for preview so it never overflows
+  const seatWidth = Math.max(8, Math.min(13, Math.floor(210 / Number(seatsPerRow))));
+  const seatHeight = Math.max(7, seatWidth - 2);
+
   const handleSubmit = (e) => {
     e.preventDefault();
     onSave({
@@ -556,165 +560,313 @@ function RoomModal({ room, cinemaId, onClose, onSave }) {
   };
 
   return (
-    <div className="modal-admin-overlay" onClick={onClose}>
-      <div className="modal-admin-window" onClick={e => e.stopPropagation()} style={{ maxWidth: 640, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
-        <div className="modal-admin-header">
-          <h3 style={{ color: '#fff' }}>{isEdit ? 'Chỉnh sửa phòng chiếu' : 'Thêm phòng chiếu & Cấu hình sơ đồ ghế'}</h3>
-          <button onClick={onClose} style={{ color: 'var(--admin-text-muted)' }}><X size={20} /></button>
+    <div className="modal-admin-overlay" onClick={onClose} style={{ padding: 16 }}>
+      <div
+        className="modal-admin-window"
+        onClick={e => e.stopPropagation()}
+        style={{
+          maxWidth: isEdit ? 480 : 860,
+          width: '96vw',
+          maxHeight: '92vh',
+          display: 'flex',
+          flexDirection: 'column',
+          overflowX: 'hidden',
+          borderRadius: 16,
+          boxShadow: '0 25px 60px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255,255,255,0.08)'
+        }}
+      >
+        {/* Header */}
+        <div className="modal-admin-header" style={{ padding: '16px 22px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 8, background: 'rgba(225, 29, 72, 0.15)', border: '1px solid rgba(225, 29, 72, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#f43f5e' }}>
+              <Building2 size={18} />
+            </div>
+            <div>
+              <h3 style={{ color: '#fff', fontSize: '1.05rem', margin: 0, fontWeight: 700 }}>
+                {isEdit ? 'Chỉnh sửa phòng chiếu' : 'Thêm phòng chiếu & Sơ đồ ghế'}
+              </h3>
+              <p style={{ margin: 0, fontSize: '0.74rem', color: 'var(--admin-text-muted)' }}>
+                {isEdit ? 'Cập nhật tên, định dạng hoặc trạng thái phòng' : 'Thiết lập thông tin và cấu hình dãy ghế phòng chiếu'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{ color: 'var(--admin-text-muted)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 4, borderRadius: 6 }}
+          >
+            <X size={20} />
+          </button>
         </div>
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <div className="modal-admin-body" style={{ overflowY: 'auto', maxHeight: 'calc(92vh - 130px)', paddingRight: 10 }}>
-            <div className="form-field">
-              <label>Tên phòng chiếu *</label>
-              <input required value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
-                placeholder="Ví dụ: Cinema 1, IMAX Hall 01, SCREENX 03..." />
-            </div>
-            <div className="form-row">
-              <div className="form-field">
-                <label>Định dạng phòng</label>
-                <select value={form.format} onChange={e => setForm(p => ({ ...p, format: e.target.value }))}>
-                  {ROOM_FORMATS.map(f => <option key={f} value={f}>{f}</option>)}
-                </select>
-              </div>
-              <div className="form-field">
-                <label>Trạng thái phòng</label>
-                <select value={form.status} onChange={e => setForm(p => ({ ...p, status: e.target.value }))}>
-                  <option value="ACTIVE">Hoạt động</option>
-                  <option value="MAINTENANCE">Đang bảo trì / Sửa chữa</option>
-                  <option value="INACTIVE">Ngưng hoạt động</option>
-                </select>
-              </div>
-            </div>
 
-            <div className="form-field">
-              <label>Sức chứa (Tổng số ghế)</label>
-              <input
-                type="number"
-                value={form.capacity || 0}
-                disabled
-                readOnly
-                title="Sức chứa tự động đồng bộ theo tổng số ghế trong sơ đồ phòng"
-                style={{ opacity: 0.85, cursor: 'not-allowed', background: 'rgba(255,255,255,0.06)', fontWeight: 700, color: '#38bdf8' }}
-              />
-              <span style={{ fontSize: '0.72rem', color: 'var(--admin-text-secondary)', marginTop: 4 }}>
-                🔒 Tự động tính theo tổng số ghế ({form.capacity || 0} ghế)
-              </span>
-            </div>
+        {/* Body */}
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', flex: 1 }}>
+          <div
+            className="modal-admin-body"
+            style={{
+              padding: isEdit ? 20 : '18px 22px',
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              maxHeight: 'calc(92vh - 135px)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 16
+            }}
+          >
+            {isEdit ? (
+              /* Single column edit layout */
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div className="form-field" style={{ minWidth: 0 }}>
+                  <label>Tên phòng chiếu *</label>
+                  <input
+                    required
+                    value={form.name}
+                    onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
+                    placeholder="Ví dụ: Cinema 1, IMAX Hall 01..."
+                  />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12 }}>
+                  <div className="form-field" style={{ minWidth: 0 }}>
+                    <label>Định dạng phòng</label>
+                    <select value={form.format} onChange={e => setForm(p => ({ ...p, format: e.target.value }))} style={{ width: '100%' }}>
+                      {ROOM_FORMATS.map(f => <option key={f} value={f}>{f}</option>)}
+                    </select>
+                  </div>
+                  <div className="form-field" style={{ minWidth: 0 }}>
+                    <label>Trạng thái</label>
+                    <select value={form.status} onChange={e => setForm(p => ({ ...p, status: e.target.value }))} style={{ width: '100%' }}>
+                      <option value="ACTIVE">Hoạt động</option>
+                      <option value="MAINTENANCE">Đang bảo trì</option>
+                      <option value="INACTIVE">Ngưng hoạt động</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="form-field" style={{ minWidth: 0 }}>
+                  <label>Sức chứa (Tổng ghế)</label>
+                  <input
+                    type="number"
+                    value={form.capacity || 0}
+                    disabled
+                    readOnly
+                    style={{ opacity: 0.75, cursor: 'not-allowed', background: 'rgba(255,255,255,0.06)', fontWeight: 600, color: '#38bdf8' }}
+                  />
+                </div>
+              </div>
+            ) : (
+              /* 2-column layout for New Room creation */
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'minmax(0, 1.05fr) minmax(0, 0.95fr)',
+                  gap: 18,
+                  alignItems: 'start',
+                  width: '100%',
+                  boxSizing: 'border-box'
+                }}
+              >
+                {/* CỘT TRÁI: THÔNG TIN & THIẾT LẬP DÃY GHẾ */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
+                  {/* Nhóm 1: Thông tin phòng */}
+                  <div style={{ padding: '12px 14px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10 }}>
+                    <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#94a3b8', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      1. Thông tin phòng chiếu
+                    </div>
+                    <div className="form-field" style={{ marginBottom: 10, minWidth: 0 }}>
+                      <label style={{ fontSize: '0.78rem' }}>Tên phòng chiếu *</label>
+                      <input
+                        required
+                        value={form.name}
+                        onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
+                        placeholder="Ví dụ: Cinema 1, IMAX Hall 01..."
+                        style={{ padding: '7px 11px', fontSize: '0.84rem' }}
+                      />
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 10 }}>
+                      <div className="form-field" style={{ minWidth: 0 }}>
+                        <label style={{ fontSize: '0.78rem' }}>Định dạng</label>
+                        <select value={form.format} onChange={e => setForm(p => ({ ...p, format: e.target.value }))} style={{ padding: '7px 10px', fontSize: '0.82rem', width: '100%' }}>
+                          {ROOM_FORMATS.map(f => <option key={f} value={f}>{f}</option>)}
+                        </select>
+                      </div>
+                      <div className="form-field" style={{ minWidth: 0 }}>
+                        <label style={{ fontSize: '0.78rem' }}>Trạng thái</label>
+                        <select value={form.status} onChange={e => setForm(p => ({ ...p, status: e.target.value }))} style={{ padding: '7px 10px', fontSize: '0.82rem', width: '100%' }}>
+                          <option value="ACTIVE">Hoạt động</option>
+                          <option value="MAINTENANCE">Đang bảo trì</option>
+                          <option value="INACTIVE">Ngưng hoạt động</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
 
-            {!isEdit && (
-              <div style={{ marginTop: 14, padding: '14px 16px', background: 'rgba(30, 41, 59, 0.7)', border: '1px solid rgba(59, 130, 246, 0.3)', borderRadius: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', margin: 0, fontWeight: 600, color: '#93c5fd', fontSize: '0.88rem' }}>
-                    <input
-                      type="checkbox"
-                      checked={autoInitSeats}
-                      onChange={e => setAutoInitSeats(e.target.checked)}
-                      style={{ width: 16, height: 16, accentColor: '#3b82f6', cursor: 'pointer' }}
-                    />
-                    📐 Tự động khởi tạo sơ đồ dãy ghế ban đầu
-                  </label>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--admin-text-muted)' }}>
-                    {rowLetters.length} hàng × {seatsPerRow} ghế
-                  </span>
+                  {/* Nhóm 2: Cấu hình dãy ghế */}
+                  <div style={{ padding: '12px 14px', background: 'rgba(30, 41, 59, 0.45)', border: '1px solid rgba(59, 130, 246, 0.25)', borderRadius: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', margin: 0, fontWeight: 700, color: '#93c5fd', fontSize: '0.82rem' }}>
+                        <input
+                          type="checkbox"
+                          checked={autoInitSeats}
+                          onChange={e => setAutoInitSeats(e.target.checked)}
+                          style={{ width: 15, height: 15, accentColor: '#3b82f6', cursor: 'pointer' }}
+                        />
+                        2. Tự động tạo dãy ghế ban đầu
+                      </label>
+                      {autoInitSeats && (
+                        <span style={{ fontSize: '0.72rem', background: 'rgba(59, 130, 246, 0.15)', color: '#93c5fd', padding: '2px 7px', borderRadius: 4, fontWeight: 600 }}>
+                          {rowLetters.length} hàng × {seatsPerRow} ghế
+                        </span>
+                      )}
+                    </div>
+
+                    {autoInitSeats && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 10 }}>
+                          <div className="form-field" style={{ minWidth: 0 }}>
+                            <label style={{ fontSize: '0.76rem' }}>Hàng từ A đến</label>
+                            <select value={endRow} onChange={e => setEndRow(e.target.value)} style={{ padding: '7px 8px', fontSize: '0.8rem', width: '100%' }}>
+                              <option value="F">Hàng F (6 hàng: A-F)</option>
+                              <option value="H">Hàng H (8 hàng: A-H)</option>
+                              <option value="J">Hàng J (10 hàng: A-J)</option>
+                              <option value="K">Hàng K (11 hàng: A-K)</option>
+                              <option value="L">Hàng L (12 hàng: A-L)</option>
+                              <option value="M">Hàng M (13 hàng: A-M)</option>
+                            </select>
+                          </div>
+                          <div className="form-field" style={{ minWidth: 0 }}>
+                            <label style={{ fontSize: '0.76rem' }}>Số ghế mỗi hàng</label>
+                            <select value={seatsPerRow} onChange={e => setSeatsPerRow(Number(e.target.value))} style={{ padding: '7px 8px', fontSize: '0.8rem', width: '100%' }}>
+                              <option value={10}>10 ghế/hàng</option>
+                              <option value={12}>12 ghế/hàng (Chuẩn)</option>
+                              <option value={14}>14 ghế/hàng</option>
+                              <option value={16}>16 ghế/hàng</option>
+                              <option value={18}>18 ghế/hàng</option>
+                              <option value={20}>20 ghế/hàng</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="form-field" style={{ minWidth: 0 }}>
+                          <label style={{ fontSize: '0.76rem' }}>Mẫu phân loại ghế</label>
+                          <select value={layoutPreset} onChange={e => setLayoutPreset(e.target.value)} style={{ padding: '7px 8px', fontSize: '0.8rem', width: '100%' }}>
+                            <option value="CGV_STANDARD">Chuẩn CGV (Thường, VIP, Sweetbox cuối)</option>
+                            <option value="BALANCED">Cân đối (Nửa trước Thường, nửa sau VIP)</option>
+                            <option value="ALL_NORMAL">Toàn bộ là ghế Thường (NORMAL)</option>
+                            <option value="ALL_VIP">Toàn bộ là ghế VIP (+15k)</option>
+                          </select>
+                        </div>
+
+                        {/* Sức chứa & Tỷ lệ ghế gọn gàng */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', background: 'rgba(15, 23, 42, 0.6)', borderRadius: 7, border: '1px solid rgba(255,255,255,0.06)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: '0.74rem', color: 'var(--admin-text-muted)' }}>Sức chứa:</span>
+                            <strong style={{ fontSize: '0.88rem', color: '#38bdf8' }}>{form.capacity} ghế</strong>
+                          </div>
+                          <div style={{ display: 'flex', gap: 6, fontSize: '0.72rem' }}>
+                            <span style={{ color: '#cbd5e1' }}>⚪ {normalCount}</span>
+                            {vipCount > 0 && <span style={{ color: '#fbbf24' }}>⭐ {vipCount}</span>}
+                            {sweetboxCount > 0 && <span style={{ color: '#c084fc' }}>💜 {sweetboxCount}</span>}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                {autoInitSeats && (
-                  <>
-                    <div className="form-row">
-                      <div className="form-field">
-                        <label style={{ fontSize: '0.8rem' }}>Dãy hàng ghế (Từ hàng A đến)</label>
-                        <select value={endRow} onChange={e => setEndRow(e.target.value)}>
-                          <option value="F">Hàng F (6 hàng: A → F)</option>
-                          <option value="H">Hàng H (8 hàng: A → H — Chuẩn rạp vừa)</option>
-                          <option value="J">Hàng J (10 hàng: A → J — Rạp lớn)</option>
-                          <option value="K">Hàng K (11 hàng: A → K)</option>
-                          <option value="L">Hàng L (12 hàng: A → L — Rạp Mega/IMAX)</option>
-                          <option value="M">Hàng M (13 hàng: A → M)</option>
-                        </select>
-                      </div>
-                      <div className="form-field">
-                        <label style={{ fontSize: '0.8rem' }}>Số ghế mỗi hàng (Cột)</label>
-                        <select value={seatsPerRow} onChange={e => setSeatsPerRow(Number(e.target.value))}>
-                          <option value={10}>10 ghế/hàng (1 → 10)</option>
-                          <option value={12}>12 ghế/hàng (1 → 12 — Chuẩn CGV)</option>
-                          <option value={14}>14 ghế/hàng (1 → 14)</option>
-                          <option value={16}>16 ghế/hàng (1 → 16)</option>
-                          <option value={18}>18 ghế/hàng (1 → 18)</option>
-                          <option value={20}>20 ghế/hàng (1 → 20)</option>
-                        </select>
-                      </div>
+                {/* CỘT PHẢI: MÔ PHỎNG SƠ ĐỒ RẠP CHIẾU */}
+                <div style={{ background: '#070b13', borderRadius: 12, padding: '14px 12px', border: '1px solid rgba(255,255,255,0.08)', display: 'flex', flexDirection: 'column', minWidth: 0, boxSizing: 'border-box' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, paddingBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                      🎬 Mô phỏng sơ đồ rạp
                     </div>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--admin-text-muted)' }}>
+                      Dãy {rowLetters[0]}1 → {rowLetters[rowLetters.length - 1]}{seatsPerRow}
+                    </span>
+                  </div>
 
-                    <div className="form-field">
-                      <label style={{ fontSize: '0.8rem' }}>Mẫu phân loại dãy ghế</label>
-                      <select value={layoutPreset} onChange={e => setLayoutPreset(e.target.value)}>
-                        <option value="CGV_STANDARD">Chuẩn CGV (Hàng đầu: Thường, Hàng giữa: VIP, Hàng cuối: Sweetbox)</option>
-                        <option value="BALANCED">Cân đối (Nửa trước: Thường, Nửa sau: VIP)</option>
-                        <option value="ALL_NORMAL">Toàn bộ là ghế Thường (NORMAL)</option>
-                        <option value="ALL_VIP">Toàn bộ là ghế VIP (+15.000đ)</option>
-                      </select>
-                    </div>
-
-                    {/* Breakdown Badge */}
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12, fontSize: '0.76rem' }}>
-                      <span style={{ padding: '3px 8px', borderRadius: 4, background: 'rgba(75,85,99,0.4)', color: '#d1d5db', border: '1px solid #4b5563' }}>
-                        ⚪ Thường: {normalCount}
-                      </span>
-                      {vipCount > 0 && (
-                        <span style={{ padding: '3px 8px', borderRadius: 4, background: 'rgba(180,83,9,0.3)', color: '#fbbf24', border: '1px solid #b45309' }}>
-                          ⭐ VIP: {vipCount}
-                        </span>
-                      )}
-                      {sweetboxCount > 0 && (
-                        <span style={{ padding: '3px 8px', borderRadius: 4, background: 'rgba(124,58,237,0.3)', color: '#c084fc', border: '1px solid #7c3aed' }}>
-                          💜 Sweetbox: {sweetboxCount}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Mini Seat Preview */}
-                    <div style={{ background: '#090d16', borderRadius: 8, padding: '10px 8px', border: '1px solid #1e293b' }}>
-                      <div style={{ textAlign: 'center', marginBottom: 6 }}>
-                        <div style={{ height: 3, background: 'linear-gradient(to right, transparent, #e11d48, transparent)', width: '60%', margin: '0 auto 2px', borderRadius: 2 }} />
-                        <span style={{ fontSize: '0.62rem', color: '#94a3b8', letterSpacing: 2 }}>MÀN HÌNH</span>
+                  {autoInitSeats ? (
+                    <>
+                      {/* Màn hình cong CGV */}
+                      <div style={{ textAlign: 'center', marginBottom: 12 }}>
+                        <div style={{ height: 4, background: 'linear-gradient(to right, transparent, #e11d48, transparent)', width: '70%', margin: '0 auto 3px', borderRadius: 3, boxShadow: '0 0 10px rgba(225,29,72,0.5)' }} />
+                        <span style={{ fontSize: '0.58rem', color: '#94a3b8', letterSpacing: '0.2em', fontWeight: 600 }}>MÀN HÌNH CHÍNH</span>
                       </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center' }}>
+
+                      {/* Lưới sơ đồ ghế thu nhỏ */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center', margin: '4px 0 10px' }}>
                         {rowLetters.map(r => {
                           const rowSeats = generatedSeats.filter(s => s.rowLabel === r);
                           return (
                             <div key={r} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                              <span style={{ width: 14, fontSize: '0.62rem', color: '#64748b', textAlign: 'right', fontWeight: 600 }}>{r}</span>
+                              <span style={{ width: 12, fontSize: '0.58rem', color: '#64748b', textAlign: 'right', fontWeight: 700 }}>{r}</span>
                               <div style={{ display: 'flex', gap: 2 }}>
                                 {rowSeats.map(s => {
                                   const c = s.seatType === 'SWEETBOX' ? '#7c3aed' : (s.seatType === 'VIP' ? '#f59e0b' : '#475569');
                                   return (
                                     <div
                                       key={s.label}
-                                      title={`${s.label} (${s.seatType})`}
-                                      style={{ width: 11, height: 9, borderRadius: 2, background: c, opacity: 0.85 }}
+                                      title={`${s.label} — ${s.seatType}`}
+                                      style={{
+                                        width: seatWidth,
+                                        height: seatHeight,
+                                        borderRadius: 2,
+                                        background: c,
+                                        opacity: 0.9,
+                                        transition: 'transform 0.1s'
+                                      }}
                                     />
                                   );
                                 })}
                               </div>
-                              <span style={{ width: 14, fontSize: '0.62rem', color: '#64748b', fontWeight: 600 }}>{r}</span>
+                              <span style={{ width: 12, fontSize: '0.58rem', color: '#64748b', fontWeight: 700 }}>{r}</span>
                             </div>
                           );
                         })}
                       </div>
-                      <div style={{ textAlign: 'center', marginTop: 8, fontSize: '0.7rem', color: '#94a3b8' }}>
-                        Dãy ghế: {rowLetters[0]}1 → {rowLetters[rowLetters.length - 1]}{seatsPerRow} ({generatedSeats.length} ghế)
+
+                      {/* Chú thích màu sắc */}
+                      <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 'auto', paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.06)', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.68rem', color: '#94a3b8' }}>
+                          <div style={{ width: 8, height: 8, borderRadius: 2, background: '#475569' }} />
+                          <span>Thường</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.68rem', color: '#fbbf24' }}>
+                          <div style={{ width: 8, height: 8, borderRadius: 2, background: '#f59e0b' }} />
+                          <span>VIP (+15k)</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.68rem', color: '#c084fc' }}>
+                          <div style={{ width: 8, height: 8, borderRadius: 2, background: '#7c3aed' }} />
+                          <span>Sweetbox (+30k)</span>
+                        </div>
                       </div>
+
+                      <div style={{ textAlign: 'center', marginTop: 8, fontSize: '0.68rem', color: '#64748b' }}>
+                        💡 Sau khi tạo, có thể vào "Sơ đồ ghế" để xóa ô làm lối đi
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: '40px 10px', color: '#64748b', fontSize: '0.8rem' }}>
+                      Đã tắt tính năng tự động tạo ghế.<br />Phòng chiếu sẽ được tạo ở trạng thái chưa có ghế.
                     </div>
-                  </>
-                )}
+                  )}
+                </div>
               </div>
             )}
           </div>
-          <div className="modal-admin-footer">
-            <button type="button" className="btn-admin-secondary" onClick={onClose}>Hủy</button>
-            <button type="submit" className="btn-admin-primary">
-              <Check size={16} /> {isEdit ? 'Lưu thay đổi' : `Lưu phòng ${autoInitSeats ? `(${generatedSeats.length} ghế)` : ''}`}
-            </button>
+
+          {/* Footer */}
+          <div className="modal-admin-footer" style={{ padding: '12px 22px', borderTop: '1px solid rgba(255,255,255,0.08)', background: 'rgba(10, 15, 26, 0.6)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ fontSize: '0.78rem', color: 'var(--admin-text-muted)' }}>
+              {!isEdit && autoInitSeats && (
+                <span>Tự động sinh: <strong style={{ color: '#fff' }}>{generatedSeats.length} ghế</strong> ({rowLetters[0]}1 → {rowLetters[rowLetters.length - 1]}{seatsPerRow})</span>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button type="button" className="btn-admin-secondary" onClick={onClose} style={{ fontSize: '0.84rem', padding: '7px 16px' }}>
+                Hủy
+              </button>
+              <button type="submit" className="btn-admin-primary" style={{ fontSize: '0.84rem', padding: '7px 20px', background: 'linear-gradient(135deg, #e11d48, #be123c)' }}>
+                <Check size={16} /> {isEdit ? 'Lưu thay đổi' : `Lưu phòng (${autoInitSeats ? generatedSeats.length : 0} ghế)`}
+              </button>
+            </div>
           </div>
         </form>
       </div>
