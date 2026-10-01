@@ -46,7 +46,9 @@ export default function MovieModal({ movie, onClose, onSave }) {
   const [castList, setCastList] = useState([]);
   const [newCast, setNewCast] = useState({ actorName: '', role: 'ACTOR', characterName: '', avatarUrl: '', displayOrder: 1 });
   const [showCastForm, setShowCastForm] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [uploadStep, setUploadStep] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [activeTab, setActiveTab] = useState('basic'); // 'basic' | 'cast' | 'media'
@@ -90,19 +92,19 @@ export default function MovieModal({ movie, onClose, onSave }) {
     }));
   };
 
-  const handleUploadPoster = async (e) => {
+  const handleFileSelect = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setUploading(true);
-    try {
-      const result = await AdminApi.uploadMedia(file);
-      const url = result.url || result.fileUrl || result.publicUrl || result;
-      handleChange('posterUrl', typeof url === 'string' ? url : '');
-    } catch (err) {
-      alert('Upload thất bại: ' + err.message);
-    } finally {
-      setUploading(false);
-    }
+    setSelectedFile(file);
+    const localUrl = URL.createObjectURL(file);
+    setPreviewUrl(localUrl);
+    setSubmitError('');
+  };
+
+  const handleRemoveFile = () => {
+    setSelectedFile(null);
+    setPreviewUrl('');
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const handleAddCast = () => {
@@ -121,8 +123,19 @@ export default function MovieModal({ movie, onClose, onSave }) {
     setSubmitError('');
     setSubmitting(true);
     try {
+      let finalPosterUrl = formData.posterUrl;
+
+      // ─── CHỈ KHI ẤN NÚT LƯU MỚI TIẾN HÀNH UPLOAD LÊN S3 ───
+      if (selectedFile) {
+        setUploadStep('Đang tải ảnh lên S3...');
+        const uploadResult = await AdminApi.uploadMedia(selectedFile);
+        finalPosterUrl = uploadResult?.url || uploadResult?.fileUrl || uploadResult?.publicUrl || uploadResult;
+      }
+
+      setUploadStep('Đang lưu thông tin phim...');
       const payload = {
         ...formData,
+        posterUrl: finalPosterUrl,
         releaseDate: formData.releaseDate ? formData.releaseDate : null,
         endDate: formData.endDate ? formData.endDate : null,
         durationMinutes: Number(formData.durationMinutes || 120),
@@ -140,6 +153,7 @@ export default function MovieModal({ movie, onClose, onSave }) {
       setSubmitError(err.message || 'Lỗi lưu thông tin phim');
     } finally {
       setSubmitting(false);
+      setUploadStep('');
     }
   };
 
@@ -445,24 +459,50 @@ export default function MovieModal({ movie, onClose, onSave }) {
                 {/* Poster Upload */}
                 <div className="form-field">
                   <label>Poster phim</label>
-                  <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginTop: 8 }}>
-                    {formData.posterUrl && (
-                      <img src={formData.posterUrl} alt="poster"
-                        style={{ width: 80, height: 110, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--admin-border)' }} />
+                  <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginTop: 8 }}>
+                    {(previewUrl || formData.posterUrl) && (
+                      <div style={{ position: 'relative' }}>
+                        <img src={previewUrl || formData.posterUrl} alt="poster"
+                          style={{ width: 85, height: 120, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--admin-border)' }} />
+                        {selectedFile && (
+                          <span style={{
+                            position: 'absolute', bottom: 4, left: 4, right: 4,
+                            background: '#10b981', color: '#000', fontSize: '0.65rem',
+                            fontWeight: 800, textAlign: 'center', borderRadius: 4, padding: '2px 0'
+                          }}>
+                            Chờ tải lên
+                          </span>
+                        )}
+                      </div>
                     )}
                     <div style={{ flex: 1 }}>
                       <input type="url" value={formData.posterUrl}
-                        onChange={e => handleChange('posterUrl', e.target.value)}
-                        placeholder="https://... (nhập URL hoặc upload bên dưới)"
+                        onChange={e => {
+                          handleChange('posterUrl', e.target.value);
+                          if (selectedFile) handleRemoveFile();
+                        }}
+                        placeholder="https://... (dán URL ảnh hoặc chọn file từ máy)"
                         style={{ width: '100%', marginBottom: 8 }} />
                       <input type="file" ref={fileInputRef} accept="image/*" style={{ display: 'none' }}
-                        onChange={handleUploadPoster} />
-                      <button type="button" className="btn-admin-secondary"
-                        style={{ fontSize: '0.82rem', padding: '6px 14px' }}
-                        disabled={uploading}
-                        onClick={() => fileInputRef.current?.click()}>
-                        <Upload size={14} /> {uploading ? 'Đang upload...' : 'Upload ảnh từ máy'}
-                      </button>
+                        onChange={handleFileSelect} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                        <button type="button" className="btn-admin-secondary"
+                          style={{ fontSize: '0.82rem', padding: '6px 14px' }}
+                          onClick={() => fileInputRef.current?.click()}>
+                          <Upload size={14} /> {selectedFile ? 'Đổi ảnh khác' : 'Chọn ảnh từ máy'}
+                        </button>
+
+                        {selectedFile && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', color: '#34d399', background: 'rgba(16,185,129,0.1)', padding: '5px 10px', borderRadius: 6, border: '1px solid rgba(16,185,129,0.25)' }}>
+                            <span>📁 {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(1)}MB) — Sẽ tải lên S3 khi bạn bấm nút Lưu</span>
+                            <button type="button" onClick={handleRemoveFile}
+                              style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 2, display: 'flex' }}
+                              title="Hủy chọn file">
+                              <X size={14} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -503,7 +543,7 @@ export default function MovieModal({ movie, onClose, onSave }) {
           <div className="modal-admin-footer">
             <button type="button" className="btn-admin-secondary" onClick={onClose} disabled={submitting}>Hủy</button>
             <button type="submit" className="btn-admin-primary" disabled={submitting}>
-              <Check size={16} /> {submitting ? 'Đang lưu...' : (isEdit ? 'Cập nhật phim' : 'Tạo phim mới')}
+              <Check size={16} /> {submitting ? (uploadStep || 'Đang lưu...') : (isEdit ? 'Cập nhật phim' : 'Tạo phim mới')}
             </button>
           </div>
         </form>
