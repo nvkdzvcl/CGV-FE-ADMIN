@@ -311,7 +311,10 @@ export const AdminApi = {
     if (!file) throw new Error('Vui lòng chọn một file hình ảnh.');
 
     const folderName = 'movies';
-    const cleanFileName = (file.name || 'poster.jpg').replace(/\s+/g, '_');
+    const cleanFileName = (file.name || 'poster.jpg')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9._-]/g, '_');
     const fileType = file.type || 'image/jpeg';
 
     try {
@@ -346,17 +349,7 @@ export const AdminApi = {
       };
     } catch (err) {
       console.error('[uploadMedia error]:', err);
-      // Nếu có lỗi S3 CORS hoặc network, fallback Data URL để không chặn việc tạo/sửa phim
-      if (err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError') || err.message?.includes('CORS') || err.message?.includes('Tải lên S3 thất bại')) {
-        console.warn('[uploadMedia] S3 network issue detected, fallback to base64 data URL');
-        return new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve({ url: reader.result, fileUrl: reader.result });
-          reader.onerror = () => reject(err);
-          reader.readAsDataURL(file);
-        });
-      }
-      throw err;
+      throw new Error('Tải ảnh lên AWS S3 thất bại: ' + (err.message || 'Lỗi mạng'));
     }
   },
 

@@ -29,17 +29,21 @@ export default function MovieModal({ movie, onClose, onSave }) {
     durationMinutes: movie?.duration || movie?.durationMinutes || 120,
     ageRating: movie?.ageRating || 'P',
     showingStatus: movie?.showingStatus || 'NOW_SHOWING',
-    releaseDate: movie?.releaseDate || new Date().toISOString().split('T')[0],
-    endDate: movie?.endDate || '',
-    posterUrl: movie?.posterUrl || '',
+    releaseDate: movie?.releaseDate ? String(movie.releaseDate).substring(0, 10) : new Date().toISOString().split('T')[0],
+    endDate: movie?.endDate ? String(movie.endDate).substring(0, 10) : '',
+    posterUrl: movie?.posterUrl || movie?.poster || '',
     trailerYoutubeUrl: movie?.trailerYoutubeUrl || '',
     synopsis: movie?.synopsis || '',
     language: movie?.language || 'Tiếng Việt',
     subtitle: movie?.subtitle || '',
-    supportedModes: movie?.supportedModes || ['2D'],
+    supportedModes: Array.isArray(movie?.supportedModes)
+      ? movie.supportedModes
+      : (typeof movie?.supportedModes === 'string'
+        ? movie.supportedModes.split(',').map(s => s.trim()).filter(Boolean)
+        : ['2D']),
     isFeatured: movie?.isFeatured || false,
     genreIds: [],
-    status: 'ACTIVE'
+    status: movie?.status || 'ACTIVE'
   });
 
   const [genres, setGenres] = useState([]);
@@ -57,9 +61,11 @@ export default function MovieModal({ movie, onClose, onSave }) {
     AdminApi.getGenres().then(data => {
       setGenres(data);
       // Pre-select genres from movie
-      if (movie?.genres) {
+      if (movie?.genres && Array.isArray(movie.genres)) {
         const ids = movie.genres.map(g => g.id || g).filter(Boolean);
         setFormData(prev => ({ ...prev, genreIds: ids }));
+      } else if (movie?.genreIds && Array.isArray(movie.genreIds)) {
+        setFormData(prev => ({ ...prev, genreIds: movie.genreIds }));
       }
     }).catch(() => {});
 
