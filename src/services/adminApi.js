@@ -34,48 +34,101 @@ export const saveAdminUser = (user) => {
   localStorage.setItem(USER_KEY, JSON.stringify(user));
 };
 
-let isRefreshing = false;
-let refreshQueue = [];
+let refreshPromise = null;
 
-async function doRefreshToken() {
-  const refreshToken = getAdminRefreshToken();
-  if (!refreshToken) throw new Error('No refresh token');
-  const res = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refreshToken })
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.message || 'Refresh failed');
-  const data = json.data || json;
-  if (data.accessToken) {
-    saveAdminToken(data.accessToken);
-    if (data.refreshToken) saveAdminRefreshToken(data.refreshToken);
-    return data.accessToken;
+export async function doRefreshToken() {
+  if (refreshPromise) {
+    return refreshPromise;
   }
-  throw new Error('No access token in refresh response');
+
+  const refreshToken = getAdminRefreshToken();
+  if (!refreshToken) {
+    clearAdminSession();
+    window.dispatchEvent(new CustomEvent('cgv-admin-session-expired'));
+    throw new Error('Phiên làm việc đã hết hạn. Vui lòng đăng nhập lại.');
+  }
+
+  refreshPromise = (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken })
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || (json && json.status && json.status !== 200)) {
+        throw new Error(json?.message || 'Làm mới phiên làm việc thất bại');
+      }
+      const data = json?.data || json;
+      const newAccessToken = data?.accessToken || data?.access_token;
+      const newRefreshToken = data?.refreshToken || data?.refresh_token;
+
+      if (newAccessToken) {
+        saveAdminToken(newAccessToken);
+        if (newRefreshToken) saveAdminRefreshToken(newRefreshToken);
+        console.log('[Admin Auth] Làm mới Access Token thành công.');
+        return newAccessToken;
+      }
+      throw new Error('Không nhận được token mới từ máy chủ');
+    } catch (err) {
+      console.warn('[Admin Auth] Lỗi Refresh Token:', err.message);
+      clearAdminSession();
+      window.dispatchEvent(new CustomEvent('cgv-admin-session-expired'));
+      throw err;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
+}
+
+export async function getValidAdminToken() {
+  let token = getAdminToken();
+  if (!token) return null;
+
+  try {
+    const parts = token.split('.');
+    if (parts.length === 3) {
+      const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+      const expTime = (payload.exp || 0) * 1000;
+      // Nếu token hết hạn hoặc còn dưới 45 giây là hết hạn -> tự động refresh trước
+      if (Date.now() >= expTime - 45000) {
+        console.log('[Admin Auth] Token sắp hoặc đã hết hạn. Tự động làm mới qua Refresh Token...');
+        token = await doRefreshToken();
+      }
+    }
+  } catch (err) {
+    console.warn('[Admin Auth] Lỗi kiểm tra thời hạn token:', err.message);
+  }
+
+  return token;
 }
 
 async function adminFetch(path, options = {}, fallbackData = null) {
-  const token = getAdminToken();
-  const headers = {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(options.headers || {})
+  let token = await getValidAdminToken();
+
+  const isFormData = options.body instanceof FormData || options.isFormData;
+
+  const buildHeaders = (accessToken) => {
+    const h = { ...(options.headers || {}) };
+    if (!isFormData && !h['Content-Type']) {
+      h['Content-Type'] = 'application/json';
+    }
+    if (accessToken) {
+      h['Authorization'] = `Bearer ${accessToken}`;
+    }
+    return h;
   };
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  const timeoutMs = isFormData ? 60000 : 15000;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   const doRequest = async (accessToken) => {
-    const reqHeaders = {
-      'Content-Type': 'application/json',
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      ...(options.headers || {})
-    };
     return await fetch(`${API_BASE}${path}`, {
       ...options,
-      headers: reqHeaders,
+      headers: buildHeaders(accessToken),
       signal: options.signal || controller.signal
     });
   };
@@ -83,29 +136,16 @@ async function adminFetch(path, options = {}, fallbackData = null) {
   try {
     let res = await doRequest(token);
 
-    // Handle 401 - attempt token refresh
+    // Xử lý 401: Thử làm mới token và gửi lại request
     if (res.status === 401) {
-      if (isRefreshing) {
-        // Queue the request and wait for refresh to complete
-        const newToken = await new Promise((resolve, reject) => {
-          refreshQueue.push({ resolve, reject });
-        });
+      console.warn(`[adminFetch] 401 Unauthorized tại ${path}. Đang thử refresh token...`);
+      try {
+        const newToken = await doRefreshToken();
         res = await doRequest(newToken);
-      } else {
-        isRefreshing = true;
-        try {
-          const newToken = await doRefreshToken();
-          refreshQueue.forEach(p => p.resolve(newToken));
-          refreshQueue = [];
-          res = await doRequest(newToken);
-        } catch (refreshErr) {
-          refreshQueue.forEach(p => p.reject(refreshErr));
-          refreshQueue = [];
-          clearAdminSession();
-          throw new Error('Phiên làm việc đã hết hạn. Vui lòng đăng nhập lại.');
-        } finally {
-          isRefreshing = false;
-        }
+      } catch (refreshErr) {
+        clearAdminSession();
+        window.dispatchEvent(new CustomEvent('cgv-admin-session-expired'));
+        throw new Error('Phiên làm việc đã hết hạn. Vui lòng đăng nhập lại.');
       }
     }
 
@@ -113,6 +153,11 @@ async function adminFetch(path, options = {}, fallbackData = null) {
 
     if (!res.ok) {
       const errMsg = json?.message || json?.error || `HTTP ${res.status}`;
+      if (res.status === 401 || errMsg.toLowerCase().includes('unauthenticated')) {
+        clearAdminSession();
+        window.dispatchEvent(new CustomEvent('cgv-admin-session-expired'));
+        throw new Error('Phiên làm việc đã hết hạn. Vui lòng đăng nhập lại.');
+      }
       throw new Error(errMsg);
     }
 
@@ -142,11 +187,14 @@ export const AdminApi = {
         throw new Error(json?.message || 'Đăng nhập quản trị viên thất bại. Sai tài khoản hoặc mật khẩu.');
       }
       const data = json?.data || json;
-      if (data && data.accessToken) {
+      const accessToken = data?.accessToken || data?.access_token;
+      const refreshToken = data?.refreshToken || data?.refresh_token;
+
+      if (data && accessToken) {
         let userRoles = [];
         let parsedUser = null;
         try {
-          const parts = data.accessToken.split('.');
+          const parts = accessToken.split('.');
           if (parts.length === 3) {
             const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
             userRoles = payload.realm_access?.roles || [];
@@ -187,10 +235,10 @@ export const AdminApi = {
           throw new Error('Không thể xác minh thẩm quyền quản trị viên từ token của bạn.');
         }
 
-        saveAdminToken(data.accessToken);
-        if (data.refreshToken) saveAdminRefreshToken(data.refreshToken);
+        saveAdminToken(accessToken);
+        if (refreshToken) saveAdminRefreshToken(refreshToken);
         saveAdminUser(parsedUser);
-        return { success: true, token: data.accessToken, user: parsedUser };
+        return { success: true, token: accessToken, user: parsedUser };
       }
       throw new Error('Không nhận được token xác thực từ máy chủ.');
     } catch (err) {
@@ -260,17 +308,12 @@ export const AdminApi = {
 
   // ─── MEDIA UPLOAD ───
   uploadMedia: async (file) => {
-    const token = getAdminToken();
     const formData = new FormData();
     formData.append('file', file);
-    const res = await fetch(`${API_BASE}/api/v1/media/upload`, {
+    return await adminFetch('/api/v1/media/upload', {
       method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: formData
     });
-    const json = await res.json().catch(() => null);
-    if (!res.ok) throw new Error(json?.message || 'Upload thất bại');
-    return json?.data || json;
   },
 
   // ─── MOVIES MANAGEMENT ───

@@ -3,7 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import AdminSidebar from './components/AdminSidebar';
 import AdminHeader from './components/AdminHeader';
 import AdminLoginScreen from './components/AdminLoginScreen';
-import { getAdminUser, getAdminToken, clearAdminSession } from './services/adminApi';
+import { getAdminUser, getAdminToken, clearAdminSession, getValidAdminToken } from './services/adminApi';
 
 import DashboardPage from './pages/DashboardPage';
 import MoviesAdminPage from './pages/MoviesAdminPage';
@@ -21,6 +21,40 @@ export default function App() {
     const user = getAdminUser();
     return token && user ? user : null;
   });
+
+  // Tự động duy trì phiên làm việc (Refresh Token) và xử lý khi phiên hết hạn
+  useEffect(() => {
+    // 1. Lắng nghe sự kiện phiên làm việc hết hạn (khi Refresh Token không còn hợp lệ)
+    const onSessionExpired = () => {
+      setCurrentUser(null);
+    };
+    window.addEventListener('cgv-admin-session-expired', onSessionExpired);
+
+    // 2. Định kỳ mỗi 60 giây kiểm tra và làm mới token trước khi hết hạn
+    const interval = setInterval(() => {
+      if (getAdminToken()) {
+        getValidAdminToken().catch(err => {
+          console.warn('[Session background refresh warning]', err);
+        });
+      }
+    }, 60000);
+
+    // 3. Khi người dùng mở lại tab hoặc quay lại cửa sổ trình duyệt sau một thời gian
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && getAdminToken()) {
+        getValidAdminToken().catch(err => {
+          console.warn('[Visibility change refresh warning]', err);
+        });
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      window.removeEventListener('cgv-admin-session-expired', onSessionExpired);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      clearInterval(interval);
+    };
+  }, []);
 
   const handleLogout = () => {
     if (window.confirm('Bạn có muốn đăng xuất khỏi trang quản trị?')) {
