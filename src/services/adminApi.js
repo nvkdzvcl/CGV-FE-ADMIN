@@ -841,18 +841,70 @@ export const AdminApi = {
       totalElements: INITIAL_USERS.length
     });
     const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : INITIAL_USERS);
-    return list.map(u => ({
-      id: u.id,
-      fullName: u.fullName || u.username || 'Người dùng CGV',
-      email: u.email,
-      phone: u.phone || '',
-      roles: u.roles || ['USER'],
-      role: u.roles?.includes('SUPER_ADMIN') ? 'SUPER_ADMIN' : (u.roles?.includes('CINEMA_MANAGER') ? 'CINEMA_MANAGER' : (u.roles?.includes('TICKET_STAFF') ? 'TICKET_STAFF' : 'USER')),
-      membershipTier: u.membershipTier?.code || u.tier || 'MEMBER',
-      loyaltyPoints: u.loyaltyPoints || 0,
-      createdAt: u.createdAt ? String(u.createdAt).substring(0, 10) : '2026-08-15',
-      status: u.status || 'ACTIVE'
-    }));
+
+    // Bản đồ gán vai trò & thông tin hiển thị chuẩn cho các tài khoản quản trị Keycloak
+    const ENTERPRISE_PROFILES = {
+      'superadmin.headquarters.enterprise@cgv.vn': {
+        fullName: 'Enterprise CGV SuperAdmin',
+        roles: ['SUPER_ADMIN'],
+        role: 'SUPER_ADMIN'
+      },
+      'cinemamanager.vincom.dongkhoi@cgv.vn': {
+        fullName: 'Dong Khoi Manager Vincom',
+        roles: ['CINEMA_MANAGER'],
+        role: 'CINEMA_MANAGER'
+      },
+      'ticketstaff.boxoffice.crescentmall@cgv.vn': {
+        fullName: 'Crescent Staff BoxOffice',
+        roles: ['TICKET_STAFF'],
+        role: 'TICKET_STAFF'
+      },
+      'marketing.contentlead.digital@cgv.vn': {
+        fullName: 'Campaign Lead Marketing Content',
+        roles: ['MARKETING', 'CONTENT_MANAGER'],
+        role: 'MARKETING'
+      },
+      'admin@gmail.com': {
+        fullName: 'Huy Admin',
+        roles: ['SUPER_ADMIN'],
+        role: 'SUPER_ADMIN'
+      },
+      'admin.huy@cgv.vn': {
+        fullName: 'Lê Hoàng Huy',
+        roles: ['ADMIN'],
+        role: 'ADMIN'
+      },
+      'staff.boxoffice@cgv.vn': {
+        fullName: 'Nguyễn Văn Staff',
+        roles: ['TICKET_STAFF'],
+        role: 'TICKET_STAFF'
+      }
+    };
+
+    return list.map(u => {
+      const enterprise = ENTERPRISE_PROFILES[u.email] || {};
+      const roles = (u.roles && u.roles.length > 0 && u.roles[0] !== 'USER') ? u.roles : (enterprise.roles || u.roles || ['USER']);
+      const role = enterprise.role || (
+        roles.includes('SUPER_ADMIN') ? 'SUPER_ADMIN' :
+        roles.includes('ADMIN') ? 'ADMIN' :
+        roles.includes('CINEMA_MANAGER') ? 'CINEMA_MANAGER' :
+        roles.includes('TICKET_STAFF') ? 'TICKET_STAFF' :
+        (roles.includes('MARKETING') || roles.includes('CONTENT_MANAGER')) ? 'MARKETING' : 'USER'
+      );
+
+      return {
+        id: u.id,
+        fullName: u.fullName || enterprise.fullName || u.username || (role !== 'USER' ? 'Quản trị viên CGV' : 'Người dùng CGV'),
+        email: u.email,
+        phone: u.phone || '',
+        roles,
+        role,
+        membershipTier: u.membershipTier?.code || u.tier || 'MEMBER',
+        loyaltyPoints: u.loyaltyPoints || 0,
+        createdAt: u.createdAt ? String(u.createdAt).substring(0, 10) : '2026-08-15',
+        status: u.status || 'ACTIVE'
+      };
+    });
   },
 
   blockUser: async (userId) => {

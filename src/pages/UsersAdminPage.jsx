@@ -69,6 +69,15 @@ export const ROLE_DETAILS = {
     scope: 'Ưu đãi & Khuyến mãi',
     description: 'Tạo mã voucher, thiết lập chương trình khuyến mãi, chạy batch job nạp voucher và quản lý banner.'
   },
+  CONTENT_MANAGER: {
+    key: 'CONTENT_MANAGER',
+    title: 'Trưởng phòng nội dung',
+    category: 'STAFF',
+    badgeColor: 'primary',
+    icon: Gift,
+    scope: 'Nội dung & Khuyến mãi',
+    description: 'Quản lý nội dung phim, hình ảnh banner và chiến dịch tiếp thị điện ảnh.'
+  },
   USER: {
     key: 'USER',
     title: 'Khách hàng thành viên',
@@ -80,7 +89,7 @@ export const ROLE_DETAILS = {
   }
 };
 
-const MANAGEMENT_ROLES = ['SUPER_ADMIN', 'ADMIN', 'CINEMA_MANAGER', 'TICKET_STAFF', 'MARKETING'];
+const MANAGEMENT_ROLES = ['SUPER_ADMIN', 'ADMIN', 'CINEMA_MANAGER', 'TICKET_STAFF', 'MARKETING', 'CONTENT_MANAGER'];
 
 function Toast({ notification }) {
   if (!notification) return null;
