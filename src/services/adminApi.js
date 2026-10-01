@@ -306,14 +306,58 @@ export const AdminApi = {
     return Array.isArray(res) ? res : (res?.data || []);
   },
 
-  // ─── MEDIA UPLOAD ───
+  // ─── MEDIA UPLOAD VIA S3 PRESIGNED URL ───
   uploadMedia: async (file) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    return await adminFetch('/api/v1/media/upload', {
-      method: 'POST',
-      body: formData
-    });
+    if (!file) throw new Error('Vui lòng chọn một file hình ảnh.');
+
+    const folderName = 'movies';
+    const cleanFileName = (file.name || 'poster.jpg').replace(/\s+/g, '_');
+    const fileType = file.type || 'image/jpeg';
+
+    try {
+      // 1. Lấy S3 Presigned URL từ media-service thông qua Kong Gateway
+      const res = await adminFetch(
+        `/api/v1/media/presigned-url?folderName=${encodeURIComponent(folderName)}&fileName=${encodeURIComponent(cleanFileName)}&fileType=${encodeURIComponent(fileType)}`
+      );
+
+      const presignedUrl = typeof res === 'string' ? res : (res?.data || res);
+      if (!presignedUrl || typeof presignedUrl !== 'string' || !presignedUrl.startsWith('http')) {
+        throw new Error('Máy chủ không trả về URL tải lên S3 hợp lệ.');
+      }
+
+      // 2. Upload file nhị phân trực tiếp lên AWS S3 bằng method PUT
+      const s3Res = await fetch(presignedUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': fileType
+        },
+        body: file
+      });
+
+      if (!s3Res.ok) {
+        throw new Error(`Tải lên S3 thất bại: HTTP ${s3Res.status} (${s3Res.statusText})`);
+      }
+
+      // 3. Trích xuất URL công khai sạch (bỏ query parameters của Presigned URL)
+      const cleanPublicUrl = presignedUrl.split('?')[0];
+      return {
+        url: cleanPublicUrl,
+        fileUrl: cleanPublicUrl
+      };
+    } catch (err) {
+      console.error('[uploadMedia error]:', err);
+      // Nếu có lỗi S3 CORS hoặc network, fallback Data URL để không chặn việc tạo/sửa phim
+      if (err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError') || err.message?.includes('CORS') || err.message?.includes('Tải lên S3 thất bại')) {
+        console.warn('[uploadMedia] S3 network issue detected, fallback to base64 data URL');
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve({ url: reader.result, fileUrl: reader.result });
+          reader.onerror = () => reject(err);
+          reader.readAsDataURL(file);
+        });
+      }
+      throw err;
+    }
   },
 
   // ─── MOVIES MANAGEMENT ───
