@@ -3,29 +3,27 @@ import { Film, Shield, Lock, User, AlertCircle, ArrowRight, CheckCircle2 } from 
 import { AdminApi } from '../services/adminApi';
 
 export default function AdminLoginScreen({ onLoginSuccess }) {
-  const [username, setUsername] = useState('admin@gmail.com');
-  const [password, setPassword] = useState('admin123');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!username.trim() || !password.trim()) {
+      setError('Vui lòng nhập đầy đủ tài khoản và mật khẩu.');
+      return;
+    }
     setError('');
     setLoading(true);
     try {
-      const res = await AdminApi.login(username, password);
+      const res = await AdminApi.login(username.trim(), password.trim());
       onLoginSuccess(res.user);
     } catch (err) {
       setError(err.message || 'Sai tên đăng nhập hoặc mật khẩu quản trị viên.');
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleQuickFill = (u, p) => {
-    setUsername(u);
-    setPassword(p);
-    setError('');
   };
 
   return (
@@ -101,7 +99,7 @@ export default function AdminLoginScreen({ onLoginSuccess }) {
                 required
                 className="table-search-input"
                 style={{ width: '100%', paddingLeft: 40, height: 42 }}
-                placeholder="admin@gmail.com"
+                placeholder="admin@cgv.vn"
                 value={username}
                 onChange={e => setUsername(e.target.value)}
               />
@@ -136,42 +134,6 @@ export default function AdminLoginScreen({ onLoginSuccess }) {
             <ArrowRight size={16} />
           </button>
         </form>
-
-        {/* Quick Role Fillers */}
-        <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-          <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--admin-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
-            Tài khoản mẫu thử nghiệm phân quyền (RBAC):
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <button
-              type="button"
-              onClick={() => handleQuickFill('admin@gmail.com', 'admin123')}
-              className="btn-admin-secondary"
-              style={{ justifyContent: 'space-between', padding: '8px 12px', fontSize: '0.8rem' }}
-            >
-              <span>👑 <strong>Super Admin</strong> (Toàn quyền hệ thống)</span>
-              <code style={{ fontSize: '0.72rem', color: 'var(--admin-primary-hover)' }}>admin@gmail.com</code>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickFill('manager_test', 'manager123')}
-              className="btn-admin-secondary"
-              style={{ justifyContent: 'space-between', padding: '8px 12px', fontSize: '0.8rem' }}
-            >
-              <span>🏢 <strong>Cinema Manager</strong> (Phim, Rạp, Lịch, Vé)</span>
-              <code style={{ fontSize: '0.72rem', color: '#fbbf24' }}>manager_test</code>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickFill('staff_test', 'staff123')}
-              className="btn-admin-secondary"
-              style={{ justifyContent: 'space-between', padding: '8px 12px', fontSize: '0.8rem' }}
-            >
-              <span>🎟️ <strong>Ticket Staff</strong> (Chỉ Soát Vé Quầy & QR)</span>
-              <code style={{ fontSize: '0.72rem', color: '#34d399' }}>staff_test</code>
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );

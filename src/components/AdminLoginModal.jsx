@@ -3,8 +3,8 @@ import { ShieldCheck, Lock, User, AlertCircle, ArrowRight, Film } from 'lucide-r
 import { AdminApi } from '../services/adminApi';
 
 export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
-  const [username, setUsername] = useState('admin@gmail.com');
-  const [password, setPassword] = useState('admin123');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -30,12 +30,6 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleQuickFill = () => {
-    setUsername('admin@gmail.com');
-    setPassword('admin123');
-    setErrorMsg('');
   };
 
   return (
@@ -79,7 +73,7 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
                 required
                 className="table-search-input"
                 style={{ width: '100%', paddingLeft: 38, background: '#090d16', border: '1px solid var(--admin-border)' }}
-                placeholder="admin@gmail.com"
+                placeholder="admin@cgv.vn"
                 value={username}
                 onChange={e => setUsername(e.target.value)}
               />
@@ -102,21 +96,6 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
                 onChange={e => setPassword(e.target.value)}
               />
             </div>
-          </div>
-
-          <div style={{
-            background: 'rgba(255, 255, 255, 0.03)', border: '1px dashed rgba(255, 255, 255, 0.12)',
-            borderRadius: 8, padding: '10px 12px', fontSize: '0.78rem', color: '#94a3b8',
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center'
-          }}>
-            <span>Tài khoản mẫu: <strong>admin@gmail.com / admin123</strong></span>
-            <button
-              type="button"
-              onClick={handleQuickFill}
-              style={{ background: 'none', border: 'none', color: '#e11d48', cursor: 'pointer', fontWeight: 700, fontSize: '0.8rem' }}
-            >
-              Điền nhanh
-            </button>
           </div>
 
           <button
