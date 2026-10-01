@@ -760,35 +760,51 @@ export const AdminApi = {
     }));
   },
 
+  extractUuid: (input) => {
+    if (!input || typeof input !== 'string') return '';
+    const trimmed = input.trim();
+    // 1. Match standard 36-char UUID (8-4-4-4-12 hex format)
+    const match = trimmed.match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);
+    if (match) return match[0].toLowerCase();
+    // 2. Strip standard prefixes like CGV_TICKET_, TICKET_, BK-, etc.
+    return trimmed.replace(/^(CGV_TICKET_|TICKET_|BK-|BOOKING_)/i, '');
+  },
+
   adminCheckIn: async (bookingId) => {
-    return await adminFetch(`/api/v1/bookings/admin/check-in/${bookingId}`, {
+    const cleanId = AdminApi.extractUuid(bookingId);
+    return await adminFetch(`/api/v1/bookings/admin/check-in/${cleanId}`, {
       method: 'POST'
     });
   },
 
   adminRefund: async (bookingId) => {
-    return await adminFetch(`/api/v1/bookings/admin/refund/${bookingId}`, {
+    const cleanId = AdminApi.extractUuid(bookingId);
+    return await adminFetch(`/api/v1/bookings/admin/refund/${cleanId}`, {
       method: 'POST'
     });
   },
 
   verifyTicketQr: async (ticketCode) => {
+    const cleanId = AdminApi.extractUuid(ticketCode);
     try {
-      const res = await AdminApi.adminCheckIn(ticketCode.trim());
+      const res = await AdminApi.adminCheckIn(cleanId);
       return {
         valid: true,
         booking: {
-          id: res.bookingId || res.id || ticketCode,
+          id: res.bookingId || res.id || cleanId,
           movieTitle: res.movieTitle || 'Phim chiếu rạp CGV',
           cinemaName: res.cinemaName || 'CGV Cinema',
           roomName: res.roomName || 'Phòng chiếu',
-          seats: res.seatLabels || ['Vé vào cửa'],
+          seats: res.seatLabels || (res.seats ? res.seats.map(s => s.label || s) : ['Vé vào cửa']),
           userEmail: res.guestEmail || res.userId || 'khach@cgv.vn'
         },
         message: 'Xác thực vé QR thành công! Trạng thái vé đã chuyển sang ĐÃ SỬ DỤNG.'
       };
     } catch (err) {
-      const booking = INITIAL_BOOKINGS.find(b => b.id.toUpperCase() === ticketCode.trim().toUpperCase());
+      const booking = INITIAL_BOOKINGS.find(b =>
+        b.id.toUpperCase() === cleanId.toUpperCase() ||
+        b.id.toUpperCase() === ticketCode.trim().toUpperCase()
+      );
       if (booking) {
         if (booking.checkinStatus === 'CHECKED_IN') {
           return { valid: false, message: 'Vé đã được quét sử dụng trước đó!' };
