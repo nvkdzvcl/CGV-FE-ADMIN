@@ -4,7 +4,12 @@ import { AdminApi } from '../services/adminApi';
 
 const SUPPORTED_MODES = ['2D', '3D', 'IMAX', '4DX', 'GOLD_CLASS'];
 const LANGUAGES = ['Tiếng Việt', 'English', 'Song ngữ (Vi-Anh)', 'Phương ngữ khác'];
-const CAST_ROLES = ['ACTOR', 'ACTRESS', 'DIRECTOR', 'PRODUCER', 'WRITER', 'COMPOSER'];
+const CAST_ROLES = [
+  { value: 'LEAD', label: 'Diễn viên chính (Lead)' },
+  { value: 'SUPPORTING', label: 'Diễn viên phụ (Supporting)' },
+  { value: 'DIRECTOR', label: 'Đạo diễn (Director)' },
+  { value: 'CAMEO', label: 'Khách mời (Cameo)' }
+];
 
 function extractYoutubeId(url) {
   if (!url) return null;
@@ -48,7 +53,7 @@ export default function MovieModal({ movie, onClose, onSave }) {
 
   const [genres, setGenres] = useState([]);
   const [castList, setCastList] = useState([]);
-  const [newCast, setNewCast] = useState({ actorName: '', role: 'ACTOR', characterName: '', avatarUrl: '', displayOrder: 1 });
+  const [newCast, setNewCast] = useState({ actorName: '', roleType: 'LEAD', characterName: '', avatarUrl: '', displayOrder: 1 });
   const [showCastForm, setShowCastForm] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
@@ -74,7 +79,7 @@ export default function MovieModal({ movie, onClose, onSave }) {
         setCastList(Array.isArray(cast) ? cast : []);
       }).catch(() => {});
     }
-  }, []);
+  }, [movie]);
 
   const handleChange = (field, val) => {
     setFormData(prev => ({ ...prev, [field]: val }));
@@ -116,7 +121,7 @@ export default function MovieModal({ movie, onClose, onSave }) {
   const handleAddCast = () => {
     if (!newCast.actorName.trim()) return;
     setCastList(prev => [...prev, { ...newCast, id: `temp-${Date.now()}` }]);
-    setNewCast({ actorName: '', role: 'ACTOR', characterName: '', avatarUrl: '', displayOrder: castList.length + 2 });
+    setNewCast({ actorName: '', roleType: 'LEAD', characterName: '', avatarUrl: '', displayOrder: castList.length + 2 });
     setShowCastForm(false);
   };
 
@@ -145,12 +150,13 @@ export default function MovieModal({ movie, onClose, onSave }) {
         releaseDate: formData.releaseDate ? formData.releaseDate : null,
         endDate: formData.endDate ? formData.endDate : null,
         durationMinutes: Number(formData.durationMinutes || 120),
-        cast: castList.map(c => ({
+        cast: castList.map((c, index) => ({
+          id: c.id && !String(c.id).startsWith('temp-') ? c.id : undefined,
           actorName: c.actorName,
-          role: c.role,
-          characterName: c.characterName,
-          avatarUrl: c.avatarUrl,
-          displayOrder: c.displayOrder
+          roleType: c.roleType || (c.role === 'DIRECTOR' ? 'DIRECTOR' : 'LEAD'),
+          characterName: c.characterName || '',
+          avatarUrl: c.avatarUrl || '',
+          displayOrder: Number(c.displayOrder || index + 1)
         }))
       };
       await onSave(payload);
@@ -388,8 +394,8 @@ export default function MovieModal({ movie, onClose, onSave }) {
                       </div>
                       <div className="form-field">
                         <label>Vai trò</label>
-                        <select value={newCast.role} onChange={e => setNewCast(p => ({ ...p, role: e.target.value }))}>
-                          {CAST_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                        <select value={newCast.roleType} onChange={e => setNewCast(p => ({ ...p, roleType: e.target.value }))}>
+                          {CAST_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                         </select>
                       </div>
                     </div>
@@ -424,7 +430,7 @@ export default function MovieModal({ movie, onClose, onSave }) {
                 {castList.length === 0 ? (
                   <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--admin-text-muted)' }}>
                     <User size={32} style={{ margin: '0 auto 8px', opacity: 0.4 }} />
-                    Chưa có diễn viên nào. Nhấn ""Thêm diễn viên" để bắt đầu.
+                    Chưa có diễn viên nào. Nhấn "Thêm diễn viên" để bắt đầu.
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -445,7 +451,7 @@ export default function MovieModal({ movie, onClose, onSave }) {
                         <div style={{ flex: 1 }}>
                           <div style={{ fontWeight: 700, color: '#fff', fontSize: '0.9rem' }}>{cast.actorName}</div>
                           <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-muted)' }}>
-                            {cast.role} {cast.characterName ? `— "${cast.characterName}"` : ''}
+                            {CAST_ROLES.find(r => r.value === (cast.roleType || cast.role))?.label || cast.roleType || cast.role || 'Diễn viên'} {cast.characterName ? `— "${cast.characterName}"` : ''}
                           </div>
                         </div>
                         <button type="button" onClick={() => handleRemoveCast(cast.id)}

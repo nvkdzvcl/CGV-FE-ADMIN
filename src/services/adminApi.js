@@ -413,10 +413,17 @@ export const AdminApi = {
     // Gán diễn viên nếu có
     if (created?.id && Array.isArray(movieData.cast) && movieData.cast.length > 0) {
       for (const c of movieData.cast) {
-        await adminFetch(`/api/v1/catalogs/movies/${created.id}/cast`, {
+        await adminFetch('/api/v1/catalogs/movie-casts', {
           method: 'POST',
-          body: JSON.stringify(c)
-        }).catch(() => {});
+          body: JSON.stringify({
+            movieId: created.id,
+            actorName: c.actorName?.trim(),
+            characterName: c.characterName?.trim() || '',
+            roleType: c.roleType || 'LEAD',
+            avatarUrl: c.avatarUrl?.trim() || '',
+            displayOrder: Number(c.displayOrder || 1)
+          })
+        }).catch((err) => console.warn('Lỗi thêm diễn viên:', err));
       }
     }
     realtime.emit(REALTIME_EVENTS.MOVIE_STATUS_CHANGED, {
@@ -455,6 +462,53 @@ export const AdminApi = {
         body: JSON.stringify({ showingStatus: movieData.showingStatus })
       }).catch(() => {});
     }
+
+    // ─── ĐỒNG BỘ DIỄN VIÊN CHO PHIM KHI CẬP NHẬT ───
+    if (Array.isArray(movieData.cast)) {
+      try {
+        const existingCasts = await AdminApi.getMovieCast(movieId);
+        const existingMap = new Map((existingCasts || []).map(c => [c.id, c]));
+        const keptIds = new Set();
+
+        for (const c of movieData.cast) {
+          const isExisting = c.id && !String(c.id).startsWith('temp-') && existingMap.has(c.id);
+          const castPayload = {
+            movieId,
+            actorName: c.actorName?.trim(),
+            characterName: c.characterName?.trim() || '',
+            roleType: c.roleType || 'LEAD',
+            avatarUrl: c.avatarUrl?.trim() || '',
+            displayOrder: Number(c.displayOrder || 1)
+          };
+
+          if (isExisting) {
+            keptIds.add(c.id);
+            await adminFetch(`/api/v1/catalogs/movie-casts/${c.id}`, {
+              method: 'PATCH',
+              body: JSON.stringify(castPayload)
+            }).catch(() => {});
+          } else {
+            const added = await adminFetch('/api/v1/catalogs/movie-casts', {
+              method: 'POST',
+              body: JSON.stringify(castPayload)
+            }).catch(() => {});
+            if (added?.id) keptIds.add(added.id);
+          }
+        }
+
+        // Xóa những diễn viên đã bị người dùng gỡ bỏ
+        for (const existing of existingCasts) {
+          if (!keptIds.has(existing.id)) {
+            await adminFetch(`/api/v1/catalogs/movie-casts/${existing.id}`, {
+              method: 'DELETE'
+            }).catch(() => {});
+          }
+        }
+      } catch (castErr) {
+        console.warn('Lỗi đồng bộ diễn viên:', castErr);
+      }
+    }
+
     realtime.emit(REALTIME_EVENTS.MOVIE_STATUS_CHANGED, {
       movieId,
       showingStatus: movieData.showingStatus,
@@ -491,14 +545,34 @@ export const AdminApi = {
 
   // ─── MOVIE CAST ───
   getMovieCast: async (movieId) => {
-    const res = await adminFetch(`/api/v1/catalogs/movies/${movieId}/cast`, {}, []);
+    const res = await adminFetch(`/api/v1/catalogs/movie-casts/movie/${movieId}`, {}, []);
     return Array.isArray(res) ? res : (res?.data || []);
   },
 
   addCastMember: async (movieId, data) => {
-    return await adminFetch(`/api/v1/catalogs/movies/${movieId}/cast`, {
+    return await adminFetch('/api/v1/catalogs/movie-casts', {
       method: 'POST',
-      body: JSON.stringify(data)
+      body: JSON.stringify({
+        movieId,
+        actorName: data.actorName?.trim(),
+        characterName: data.characterName?.trim() || '',
+        roleType: data.roleType || 'LEAD',
+        avatarUrl: data.avatarUrl?.trim() || '',
+        displayOrder: Number(data.displayOrder || 1)
+      })
+    });
+  },
+
+  updateCastMember: async (castId, data) => {
+    return await adminFetch(`/api/v1/catalogs/movie-casts/${castId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        actorName: data.actorName?.trim(),
+        characterName: data.characterName?.trim() || '',
+        roleType: data.roleType || 'LEAD',
+        avatarUrl: data.avatarUrl?.trim() || '',
+        displayOrder: Number(data.displayOrder || 1)
+      })
     });
   },
 
