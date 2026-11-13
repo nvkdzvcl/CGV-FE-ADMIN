@@ -1,7 +1,7 @@
 import {
   DASHBOARD_STATS, INITIAL_MOVIES, INITIAL_CINEMAS,
   INITIAL_SHOWTIMES, INITIAL_BOOKINGS,
-  INITIAL_PROMOTIONS, INITIAL_USERS, INITIAL_PAYMENTS
+  INITIAL_PROMOTIONS, INITIAL_PAYMENTS
 } from '../data/adminMockData';
 import { realtime, REALTIME_EVENTS } from './realtimeService';
 
@@ -306,8 +306,34 @@ export const AdminApi = {
     return Array.isArray(res) ? res : (res?.data || []);
   },
 
-  // ─── MEDIA UPLOAD VIA S3 PRESIGNED URL ───
   uploadMedia: async (file) => {
+    if (!file || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      throw new Error('Chỉ nhận poster JPEG, PNG hoặc WebP.');
+    }
+    if (file.size > 10 * 1024 * 1024) throw new Error('Poster không được vượt quá 10 MB.');
+
+    const { cloudName, apiKey, timestamp, folder, signature } = await adminFetch('/api/v1/media/cloudinary/upload-signature');
+    if (!cloudName || !apiKey || !timestamp || !folder || !signature) {
+      throw new Error('Máy chủ chưa cấu hình Cloudinary.');
+    }
+    const form = new FormData();
+    form.append('file', file);
+    form.append('api_key', apiKey);
+    form.append('timestamp', String(timestamp));
+    form.append('folder', folder);
+    form.append('signature', signature);
+
+    const response = await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/image/upload`, {
+      method: 'POST', body: form
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok || !result?.secure_url) {
+      throw new Error(result?.error?.message || `Tải ảnh lên Cloudinary thất bại: HTTP ${response.status}`);
+    }
+    return { url: result.secure_url, fileUrl: result.secure_url };
+  },
+
+  uploadMediaS3: async (file) => {
     if (!file) throw new Error('Vui lòng chọn một file hình ảnh.');
 
     const folderName = 'movies';
@@ -366,6 +392,8 @@ export const AdminApi = {
       genre: Array.isArray(m.genres) ? m.genres.map(g => g.name || g).join(', ') : (m.genre || 'Hành Động'),
       genres: m.genres || [],
       releaseDate: m.releaseDate ? String(m.releaseDate).substring(0, 10) : '2026-09-01',
+      endDate: m.endDate ? String(m.endDate).substring(0, 10) : '',
+      supportedModes: m.supportedModes || '2D',
       showingStatus: m.showingStatus || 'NOW_SHOWING',
       posterUrl: m.posterUrl || 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=300',
       trailerYoutubeUrl: m.trailerYoutubeUrl || '',
@@ -458,13 +486,6 @@ export const AdminApi = {
       method: 'PATCH',
       body: JSON.stringify(payload)
     });
-    if (movieData.showingStatus) {
-      await adminFetch(`/api/v1/catalogs/movies/${movieId}/showing-status`, {
-        method: 'PATCH',
-        body: JSON.stringify({ showingStatus: movieData.showingStatus })
-      }).catch(() => {});
-    }
-
     // ─── ĐỒNG BỘ DIỄN VIÊN KHI CẬP NHẬT PHIM ───
     if (Array.isArray(movieData.cast)) {
       try {
@@ -504,7 +525,7 @@ export const AdminApi = {
 
     realtime.emit(REALTIME_EVENTS.MOVIE_STATUS_CHANGED, {
       movieId,
-      showingStatus: movieData.showingStatus,
+      showingStatus: updated.showingStatus,
       title: payload.title
     });
     return updated;
@@ -844,30 +865,39 @@ export const AdminApi = {
   },
 
   // ─── ROLES ───
-  getRoles: async () => {
-    const res = await adminFetch('/api/v1/roles').catch(() => null);
-    return Array.isArray(res) ? res : (res?.data || []);
-  },
+  getRoles: () => adminFetch('/api/v1/roles'),
+  createRole: (role) => adminFetch('/api/v1/roles', { method: 'POST', body: JSON.stringify(role) }),
+  updateRole: (roleName, description) => adminFetch(`/api/v1/roles/${encodeURIComponent(roleName)}`, {
+    method: 'PUT', body: JSON.stringify({ name: roleName, description })
+  }),
+  deleteRole: (roleName) => adminFetch(`/api/v1/roles/${encodeURIComponent(roleName)}`, { method: 'DELETE' }),
 
   // ─── SHOWTIMES ───
   getShowtimes: async (params = {}) => {
     const size = params.size || 200;
     const page = params.page || 0;
-    const res = await adminFetch(`/api/v1/catalogs/showtimes?page=${page}&size=${size}`, {}, INITIAL_SHOWTIMES);
-    const list = Array.isArray(res) ? res : (res?.data || INITIAL_SHOWTIMES);
+    const res = await adminFetch(`/api/v1/catalogs/showtimes?page=${page}&size=${size}`);
+    const remaining = await Promise.all(Array.from(
+      { length: Math.max(0, (res.totalPages || 1) - page - 1) },
+      (_, index) => adminFetch(`/api/v1/catalogs/showtimes?page=${page + index + 1}&size=${size}`)
+    ));
+    const list = [res, ...remaining].flatMap(result => Array.isArray(result) ? result : result.data);
+    const vietnamTime = (value) => value?.includes('T')
+      ? new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value))
+      : value;
     return list.map(st => ({
       id: st.id,
-      date: st.showDate || '2026-09-24',
-      startTime: st.startTime ? (typeof st.startTime === 'string' && st.startTime.includes('T') ? st.startTime.substring(11, 16) : st.startTime) : '19:00',
-      endTime: st.endTime ? (typeof st.endTime === 'string' && st.endTime.includes('T') ? st.endTime.substring(11, 16) : st.endTime) : '21:30',
+      date: st.showDate,
+      startTime: vietnamTime(st.startTime),
+      endTime: vietnamTime(st.endTime),
       movieId: st.movie?.id || st.movieId,
       movieTitle: st.movie?.title || st.movieTitle || 'Phim CGV',
-      cinemaId: st.room?.cinema?.id || st.cinemaId,
-      cinemaName: st.room?.cinema?.name || st.cinemaName || 'CGV Cinema',
-      roomId: st.room?.id || st.roomId,
-      roomName: st.room?.name || st.roomName || 'Cinema 1',
-      roomStatus: st.room?.status || st.roomStatus || 'ACTIVE',
-      format: st.format || st.room?.format || '2D',
+      cinemaId: st.roomResponse?.cinemaResponse?.id || st.room?.cinema?.id || st.cinemaId,
+      cinemaName: st.roomResponse?.cinemaResponse?.name || st.room?.cinema?.name || st.cinemaName || 'CGV Cinema',
+      roomId: st.roomResponse?.id || st.room?.id || st.roomId,
+      roomName: st.roomResponse?.name || st.room?.name || st.roomName || 'Cinema 1',
+      roomStatus: st.roomResponse?.status || st.room?.status || st.roomStatus || 'ACTIVE',
+      format: st.format || st.roomResponse?.format || st.room?.format || '2D',
       availableSeats: st.availableSeats ?? 80,
       basePrice: Number(st.basePrice || 90000),
       status: st.status || 'OPEN'
@@ -1069,72 +1099,29 @@ export const AdminApi = {
 
   // ─── USERS MANAGEMENT ───
   getUsers: async (page = 0, size = 50) => {
-    const res = await adminFetch(`/api/v1/users?page=${page}&size=${size}`, {}, {
-      data: INITIAL_USERS,
-      totalElements: INITIAL_USERS.length
-    });
-    const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : INITIAL_USERS);
-
-    // Bản đồ gán vai trò & thông tin hiển thị chuẩn cho các tài khoản quản trị Keycloak
-    const ENTERPRISE_PROFILES = {
-      'superadmin.headquarters.enterprise@cgv.vn': {
-        fullName: 'Enterprise CGV SuperAdmin',
-        roles: ['SUPER_ADMIN'],
-        role: 'SUPER_ADMIN'
-      },
-      'cinemamanager.vincom.dongkhoi@cgv.vn': {
-        fullName: 'Dong Khoi Manager Vincom',
-        roles: ['CINEMA_MANAGER'],
-        role: 'CINEMA_MANAGER'
-      },
-      'ticketstaff.boxoffice.crescentmall@cgv.vn': {
-        fullName: 'Crescent Staff BoxOffice',
-        roles: ['TICKET_STAFF'],
-        role: 'TICKET_STAFF'
-      },
-      'marketing.contentlead.digital@cgv.vn': {
-        fullName: 'Campaign Lead Marketing Content',
-        roles: ['MARKETING', 'CONTENT_MANAGER'],
-        role: 'MARKETING'
-      },
-      'admin@gmail.com': {
-        fullName: 'Huy Admin',
-        roles: ['SUPER_ADMIN'],
-        role: 'SUPER_ADMIN'
-      },
-      'admin.huy@cgv.vn': {
-        fullName: 'Lê Hoàng Huy',
-        roles: ['ADMIN'],
-        role: 'ADMIN'
-      },
-      'staff.boxoffice@cgv.vn': {
-        fullName: 'Nguyễn Văn Staff',
-        roles: ['TICKET_STAFF'],
-        role: 'TICKET_STAFF'
-      }
-    };
+    const res = await adminFetch(`/api/v1/users?page=${page + 1}&size=${size}`);
+    const list = res?.data || [];
 
     return list.map(u => {
-      const enterprise = ENTERPRISE_PROFILES[u.email] || {};
-      const roles = (u.roles && u.roles.length > 0 && u.roles[0] !== 'USER') ? u.roles : (enterprise.roles || u.roles || ['USER']);
-      const role = enterprise.role || (
+      const roles = u.roles || [];
+      const role = (
         roles.includes('SUPER_ADMIN') ? 'SUPER_ADMIN' :
         roles.includes('ADMIN') ? 'ADMIN' :
         roles.includes('CINEMA_MANAGER') ? 'CINEMA_MANAGER' :
         roles.includes('TICKET_STAFF') ? 'TICKET_STAFF' :
-        (roles.includes('MARKETING') || roles.includes('CONTENT_MANAGER')) ? 'MARKETING' : 'USER'
+        roles.includes('CONTENT_MANAGER') ? 'CONTENT_MANAGER' : 'USER'
       );
 
       return {
         id: u.id,
-        fullName: u.fullName || enterprise.fullName || u.username || (role !== 'USER' ? 'Quản trị viên CGV' : 'Người dùng CGV'),
+        fullName: u.fullName || u.username || u.email,
         email: u.email,
         phone: u.phone || '',
         roles,
         role,
         membershipTier: u.membershipTier?.code || u.tier || 'MEMBER',
         loyaltyPoints: u.loyaltyPoints || 0,
-        createdAt: u.createdAt ? String(u.createdAt).substring(0, 10) : '2026-08-15',
+        createdAt: u.createdAt ? String(u.createdAt).substring(0, 10) : '',
         status: u.status || 'ACTIVE'
       };
     });
@@ -1169,14 +1156,6 @@ export const AdminApi = {
       method: 'POST',
       body: JSON.stringify(data)
     });
-    const userId = res?.id || res?.userId || res?.data?.id || res?.data?.userId;
-    if (userId && data.role && data.role !== 'USER') {
-      try {
-        await AdminApi.assignRole(userId, data.role);
-      } catch (err) {
-        console.warn('Could not assign initial role to user:', err.message);
-      }
-    }
     return res;
   },
 

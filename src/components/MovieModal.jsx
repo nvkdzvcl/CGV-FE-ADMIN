@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Film, Check, Plus, Trash2, Upload, Play, User } from 'lucide-react';
 import { AdminApi } from '../services/adminApi';
+import { vietnamToday } from '../services/showtimeSlots';
 
 const SUPPORTED_MODES = ['2D', '3D', 'IMAX', '4DX', 'GOLD_CLASS'];
 const LANGUAGES = ['Tiếng Việt', 'English', 'Song ngữ (Vi-Anh)', 'Phương ngữ khác'];
@@ -34,7 +35,7 @@ export default function MovieModal({ movie, onClose, onSave }) {
     durationMinutes: movie?.duration || movie?.durationMinutes || 120,
     ageRating: movie?.ageRating || 'P',
     showingStatus: movie?.showingStatus || 'NOW_SHOWING',
-    releaseDate: movie?.releaseDate ? String(movie.releaseDate).substring(0, 10) : new Date().toISOString().split('T')[0],
+    releaseDate: movie?.releaseDate ? String(movie.releaseDate).substring(0, 10) : vietnamToday(),
     endDate: movie?.endDate ? String(movie.endDate).substring(0, 10) : '',
     posterUrl: movie?.posterUrl || movie?.poster || '',
     trailerYoutubeUrl: movie?.trailerYoutubeUrl || '',
@@ -82,7 +83,15 @@ export default function MovieModal({ movie, onClose, onSave }) {
   }, []);
 
   const handleChange = (field, val) => {
-    setFormData(prev => ({ ...prev, [field]: val }));
+    setFormData(prev => {
+      const next = { ...prev, [field]: val };
+      if ((field === 'releaseDate' || field === 'endDate') && next.releaseDate && (!next.endDate || next.endDate >= next.releaseDate)) {
+        const today = vietnamToday();
+        next.showingStatus = next.endDate && next.endDate < today ? 'ENDED'
+          : next.releaseDate > today ? 'COMING_SOON' : 'NOW_SHOWING';
+      }
+      return next;
+    });
   };
 
   const toggleGenre = (genreId) => {
@@ -142,13 +151,20 @@ export default function MovieModal({ movie, onClose, onSave }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitError('');
+    if (formData.endDate && formData.releaseDate && formData.endDate < formData.releaseDate) {
+      setSubmitError('Ngày kết thúc chiếu không được trước ngày khởi chiếu.');
+      return;
+    }
+    if (!formData.releaseDate) {
+      setSubmitError('Cần ngày khởi chiếu để xác định trạng thái phim.');
+      return;
+    }
     setSubmitting(true);
     try {
       let finalPosterUrl = formData.posterUrl;
 
-      // ─── CHỈ KHI ẤN NÚT LƯU MỚI TIẾN HÀNH UPLOAD LÊN S3 ───
       if (selectedFile) {
-        setUploadStep('Đang tải ảnh lên S3...');
+        setUploadStep('Đang tải ảnh lên Cloudinary...');
         const uploadResult = await AdminApi.uploadMedia(selectedFile);
         finalPosterUrl = uploadResult?.url || uploadResult?.fileUrl || uploadResult?.publicUrl || uploadResult;
       }
@@ -309,15 +325,17 @@ export default function MovieModal({ movie, onClose, onSave }) {
                   <div className="form-field">
                     <label>Ngày kết thúc chiếu (dự kiến)</label>
                     <input type="date" value={formData.endDate}
+                      min={formData.releaseDate || undefined}
                       onChange={e => handleChange('endDate', e.target.value)} />
                   </div>
                   <div className="form-field">
                     <label>Trạng thái phát hành</label>
-                    <select value={formData.showingStatus} onChange={e => handleChange('showingStatus', e.target.value)}>
+                    <select value={formData.showingStatus} disabled>
                       <option value="NOW_SHOWING">Đang chiếu</option>
                       <option value="COMING_SOON">Sắp chiếu</option>
                       <option value="ENDED">Đã kết thúc / Ngừng chiếu</option>
                     </select>
+                    <small>Trạng thái tự cập nhật theo ngày khởi chiếu và kết thúc chiếu (giờ Việt Nam).</small>
                   </div>
                 </div>
 
@@ -531,7 +549,7 @@ export default function MovieModal({ movie, onClose, onSave }) {
                         }}
                         placeholder="https://... (dán URL ảnh hoặc chọn file từ máy)"
                         style={{ width: '100%', marginBottom: 8 }} />
-                      <input type="file" ref={fileInputRef} accept="image/*" style={{ display: 'none' }}
+                      <input type="file" ref={fileInputRef} accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }}
                         onChange={handleFileSelect} />
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                         <button type="button" className="btn-admin-secondary"
@@ -542,7 +560,7 @@ export default function MovieModal({ movie, onClose, onSave }) {
 
                         {selectedFile && (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', color: '#34d399', background: 'rgba(16,185,129,0.1)', padding: '5px 10px', borderRadius: 6, border: '1px solid rgba(16,185,129,0.25)' }}>
-                            <span>📁 {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(1)}MB) — Sẽ tải lên S3 khi bạn bấm nút Lưu</span>
+                            <span>📁 {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(1)}MB) — Sẽ tải lên Cloudinary khi bạn bấm nút Lưu</span>
                             <button type="button" onClick={handleRemoveFile}
                               style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 2, display: 'flex' }}
                               title="Hủy chọn file">
