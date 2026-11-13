@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Plus, Trash2, RefreshCw, CheckCircle, AlertCircle, X, Check, Users, Key, Search } from 'lucide-react';
+import { Shield, Plus, Trash2, Pencil, RefreshCw, CheckCircle, AlertCircle, X, Check, Users, Key, Search } from 'lucide-react';
 import { AdminApi } from '../services/adminApi';
 
 const SYSTEM_ROLES = [
@@ -40,6 +40,8 @@ export default function RolesAdminPage() {
   const [addModal, setAddModal] = useState(false);
   const [assignModal, setAssignModal] = useState(null); // null | role object
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [editRole, setEditRole] = useState(null);
+  const [editDescription, setEditDescription] = useState('');
   const [newRole, setNewRole] = useState({ name: '', description: '' });
   const [assignUserId, setAssignUserId] = useState('');
   const [apiStatus, setApiStatus] = useState(null); // null | 'testing' | 'ok' | 'error'
@@ -53,18 +55,16 @@ export default function RolesAdminPage() {
   const loadRoles = async () => {
     setLoading(true);
     try {
-      const res = await AdminApi.getRoles?.() || await fetch('http://localhost:8000/api/v1/roles', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('cgv_admin_token')}` }
-      }).then(r => r.json()).then(j => j.data || j);
-      const list = Array.isArray(res) ? res : (res?.data || []);
+      const list = await AdminApi.getRoles();
       // Merge with system roles
       const systemNames = SYSTEM_ROLES.map(r => r.name);
       const apiRoles = list.map(r => ({ ...r, isSystem: systemNames.includes(r.name) }));
       const existingNames = apiRoles.map(r => r.name);
       const missingSystem = SYSTEM_ROLES.filter(r => !existingNames.includes(r.name));
       setRoles([...apiRoles, ...missingSystem]);
-    } catch {
-      setRoles(SYSTEM_ROLES);
+    } catch (err) {
+      setRoles([]);
+      showNotice('error', 'Không tải được vai trò: ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -95,14 +95,7 @@ export default function RolesAdminPage() {
   const handleCreateRole = async () => {
     if (!newRole.name.trim()) return;
     try {
-      const token = localStorage.getItem('cgv_admin_token');
-      const res = await fetch('http://localhost:8000/api/v1/roles', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name: newRole.name.toUpperCase().replace(/\s/g, '_'), description: newRole.description })
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.message || `HTTP ${res.status}`);
+      await AdminApi.createRole({ name: newRole.name.toUpperCase().replace(/\s/g, '_'), description: newRole.description });
       showNotice('success', `Đã tạo role "${newRole.name}" thành công.`);
       setAddModal(false);
       setNewRole({ name: '', description: '' });
@@ -115,18 +108,24 @@ export default function RolesAdminPage() {
   const handleDeleteRole = async (role) => {
     if (role.isSystem) { showNotice('error', 'Không thể xóa system role!'); return; }
     try {
-      const token = localStorage.getItem('cgv_admin_token');
-      const url = role.id ? `http://localhost:8000/api/v1/roles/${role.id}` : `http://localhost:8000/api/v1/roles/${role.name}`;
-      const res = await fetch(url, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j.message || `HTTP ${res.status}`);
-      }
+      await AdminApi.deleteRole(role.name);
       showNotice('success', `Đã xóa role "${role.name}".`);
       setConfirmDelete(null);
       loadRoles();
     } catch (err) {
       showNotice('error', 'Lỗi xóa role: ' + err.message);
+    }
+  };
+
+  const handleUpdateRole = async () => {
+    if (!editRole) return;
+    try {
+      await AdminApi.updateRole(editRole.name, editDescription.trim());
+      showNotice('success', `Đã cập nhật role "${editRole.name}".`);
+      setEditRole(null);
+      loadRoles();
+    } catch (err) {
+      showNotice('error', 'Lỗi cập nhật role: ' + err.message);
     }
   };
 
@@ -245,10 +244,16 @@ export default function RolesAdminPage() {
                   </p>
                 </div>
                 {!role.isSystem && (
-                  <button onClick={() => setConfirmDelete(role)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', padding: 4 }}>
-                    <Trash2 size={15} />
-                  </button>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button aria-label={`Sửa role ${role.name}`} onClick={() => { setEditRole(role); setEditDescription(role.description || ''); }}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#93c5fd', padding: 4 }}>
+                      <Pencil size={15} />
+                    </button>
+                    <button aria-label={`Xóa role ${role.name}`} onClick={() => setConfirmDelete(role)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', padding: 4 }}>
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -371,6 +376,25 @@ export default function RolesAdminPage() {
             <div className="modal-admin-footer">
               <button className="btn-admin-secondary" onClick={() => setAssignModal(null)}>Hủy</button>
               <button className="btn-admin-primary" onClick={handleAssignRole}><Check size={16} /> Xác nhận gán quyền</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editRole && (
+        <div className="modal-admin-overlay" onClick={() => setEditRole(null)}>
+          <div className="modal-admin-window" onClick={event => event.stopPropagation()} style={{ maxWidth: 420 }}>
+            <div className="modal-admin-header">
+              <h3 style={{ color: '#fff' }}>Sửa mô tả role: {editRole.name}</h3>
+              <button aria-label="Đóng" onClick={() => setEditRole(null)}><X size={20} /></button>
+            </div>
+            <div className="modal-admin-body form-field">
+              <label htmlFor="role-description">Mô tả</label>
+              <input id="role-description" value={editDescription} onChange={event => setEditDescription(event.target.value)} />
+            </div>
+            <div className="modal-admin-footer">
+              <button className="btn-admin-secondary" onClick={() => setEditRole(null)}>Hủy</button>
+              <button className="btn-admin-primary" onClick={handleUpdateRole}>Lưu</button>
             </div>
           </div>
         </div>

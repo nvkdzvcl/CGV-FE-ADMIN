@@ -133,7 +133,6 @@ function UserFormModal({ user, initialCategory = 'STAFF', onClose, onSave }) {
       payload.password = form.password;
     }
     onSave(payload);
-    onClose();
   };
 
   const selectedRoleInfo = ROLE_DETAILS[form.role] || ROLE_DETAILS.USER;
@@ -216,7 +215,7 @@ function UserFormModal({ user, initialCategory = 'STAFF', onClose, onSave }) {
               </label>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8, maxHeight: 260, overflowY: 'auto', paddingRight: 4 }}>
-                {Object.values(ROLE_DETAILS).map(role => {
+                {Object.values(ROLE_DETAILS).filter(role => !['ADMIN', 'MARKETING'].includes(role.key)).map(role => {
                   const Icon = role.icon;
                   const isSelected = form.role === role.key;
                   return (
@@ -313,7 +312,7 @@ function AssignRoleModal({ user, onClose, onAssign }) {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 280, overflowY: 'auto' }}>
-            {MANAGEMENT_ROLES.map(key => {
+            {['SUPER_ADMIN', 'CINEMA_MANAGER', 'TICKET_STAFF', 'CONTENT_MANAGER', 'USER'].map(key => {
               const role = ROLE_DETAILS[key];
               const Icon = role.icon;
               const isSelected = selectedRole === key;
@@ -360,7 +359,7 @@ function AssignRoleModal({ user, onClose, onAssign }) {
 
         <div className="modal-admin-footer">
           <button className="btn-admin-secondary" onClick={onClose}>Hủy</button>
-          <button className="btn-admin-primary" onClick={() => { onAssign(selectedRole); onClose(); }}>
+          <button className="btn-admin-primary" onClick={async () => { if (await onAssign(selectedRole)) onClose(); }}>
             <Shield size={14} /> Xác nhận đổi vai trò
           </button>
         </div>
@@ -536,6 +535,8 @@ export default function UsersAdminPage() {
         showNotice('success', `Đã tạo tài khoản và gán vai trò ${ROLE_DETAILS[formData.role]?.title || formData.role}.`);
       }
       loadUsers();
+      setEditModal(null);
+      setAddModal(false);
     } catch (err) {
       showNotice('error', 'Lỗi: ' + err.message);
     }
@@ -581,8 +582,10 @@ export default function UsersAdminPage() {
       await AdminApi.assignRole(userId, role);
       showNotice('success', `Đã phân vai trò ${ROLE_DETAILS[role]?.title || role} thành công.`);
       loadUsers();
+      return true;
     } catch (err) {
       showNotice('error', 'Lỗi phân quyền: ' + err.message);
+      return false;
     }
   };
 
@@ -658,7 +661,7 @@ export default function UsersAdminPage() {
             { key: 'SUPER_ADMIN', label: '👑 Quản trị tối cao', count: categorized.staffAndManagers.filter(u => (u.roles || [u.role]).includes('SUPER_ADMIN')).length },
             { key: 'CINEMA_MANAGER', label: '🏢 Quản lý cụm rạp', count: categorized.staffAndManagers.filter(u => (u.roles || [u.role]).includes('CINEMA_MANAGER')).length },
             { key: 'TICKET_STAFF', label: '🎟️ Nhân viên soát vé', count: categorized.staffAndManagers.filter(u => (u.roles || [u.role]).includes('TICKET_STAFF')).length },
-            { key: 'MARKETING', label: '🎁 Marketing', count: categorized.staffAndManagers.filter(u => (u.roles || [u.role]).includes('MARKETING')).length }
+            { key: 'CONTENT_MANAGER', label: 'Nội dung', count: categorized.staffAndManagers.filter(u => (u.roles || [u.role]).includes('CONTENT_MANAGER')).length }
           ].map(f => (
             <button
               key={f.key}
@@ -848,6 +851,7 @@ export default function UsersAdminPage() {
                         <button
                           className="btn-table-icon"
                           onClick={() => setRoleModal(u)}
+                          disabled={isSelf || u.status === 'DELETED'}
                           title="Thay đổi vai trò / Phân quyền"
                           style={{ color: '#38bdf8' }}>
                           <Shield size={14} />
@@ -857,12 +861,13 @@ export default function UsersAdminPage() {
                         <button
                           className="btn-table-icon"
                           onClick={() => setEditModal(u)}
+                          disabled={u.status === 'DELETED'}
                           title="Chỉnh sửa thông tin">
                           <Edit2 size={14} />
                         </button>
 
                         {/* Khóa/Mở khóa */}
-                        {!isSelf && (
+                        {!isSelf && u.status !== 'DELETED' && (
                           <button
                             className="btn-table-icon"
                             onClick={() => handleBlockToggle(u)}
@@ -873,7 +878,7 @@ export default function UsersAdminPage() {
                         )}
 
                         {/* Xóa */}
-                        {!isSelf && isSuperAdmin && (
+                        {!isSelf && isSuperAdmin && u.status !== 'DELETED' && (
                           <button
                             className="btn-table-icon danger"
                             onClick={() => setConfirmDelete(u)}
