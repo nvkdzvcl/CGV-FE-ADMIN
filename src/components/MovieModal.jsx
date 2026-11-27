@@ -40,6 +40,7 @@ export default function MovieModal({ movie, onClose, onSave }) {
     trailerYoutubeUrl: movie?.trailerYoutubeUrl || '',
     synopsis: movie?.synopsis || '',
     language: movie?.language || 'Tiếng Việt',
+    country: movie?.country || '',
     subtitle: movie?.subtitle || '',
     supportedModes: Array.isArray(movie?.supportedModes)
       ? movie.supportedModes
@@ -291,6 +292,15 @@ export default function MovieModal({ movie, onClose, onSave }) {
                     <select value={formData.language} onChange={e => handleChange('language', e.target.value)}>
                       {LANGUAGES.map(l => <option key={l} value={l}>{l}</option>)}
                     </select>
+                  </div>
+                  <div className="form-field">
+                    <label>Quốc gia</label>
+                    <input type="text" list="movie-country-options" value={formData.country}
+                      onChange={e => handleChange('country', e.target.value)}
+                      placeholder="VD: Việt Nam, Mỹ, Hàn Quốc" maxLength={100} />
+                    <datalist id="movie-country-options">
+                      {['Việt Nam', 'Mỹ', 'Hàn Quốc', 'Nhật Bản', 'Trung Quốc', 'Thái Lan', 'Anh', 'Pháp'].map(c => <option key={c} value={c} />)}
+                    </datalist>
                   </div>
                   <div className="form-field">
                     <label>Phụ đề</label>

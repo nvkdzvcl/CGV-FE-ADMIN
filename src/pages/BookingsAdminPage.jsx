@@ -32,15 +32,20 @@ export default function BookingsAdminPage() {
   const fetchBookings = useCallback(async (searchQuery = '') => {
     setLoading(true);
     try {
-      // Nạp danh sách vé từ backend
-      const data = await AdminApi.searchBookings(searchQuery, 0, 200);
+      // Nạp danh sách vé từ backend, lọc trạng thái + ngày đặt ngay trên server
+      const status = statusFilter === 'ALL' ? null : (statusFilter === 'PAID' ? 'CONFIRMED' : statusFilter);
+      const data = await AdminApi.searchBookings(searchQuery, 0, 200, {
+        status,
+        fromDate: dateFilter || null,
+        toDate: dateFilter || null,
+      });
       setBookings(data);
     } catch (err) {
       showNotice('error', 'Lỗi tải danh sách vé: ' + (err.message || 'Vui lòng thử lại.'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [statusFilter, dateFilter]);
 
   useEffect(() => {
     fetchBookings(keyword);
@@ -86,16 +91,26 @@ export default function BookingsAdminPage() {
   };
 
   const handleRefund = async (bookingId) => {
-    if (!window.confirm(`Xác nhận hoàn vé và hủy đơn #${bookingId}? Ghế và voucher sẽ được tự động giải phóng.`)) {
+    if (!window.confirm(`Xác nhận hoàn vé và hủy đơn #${bookingId}? Tiền sẽ được hoàn qua VNPay, ghế và voucher được giải phóng.`)) {
       return;
     }
     setActionLoadingId(bookingId);
+    let moneyRefunded = false;
     try {
+      // 1. Hoàn tiền qua VNPay trước; VNPay từ chối thì dừng, vé giữ nguyên
+      const payment = await AdminApi.refundPaymentForBooking(bookingId);
+      moneyRefunded = Boolean(payment);
+      // 2. Hủy vé, nhả ghế & voucher
       await AdminApi.adminRefund(bookingId);
       setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, checkinStatus: 'REFUNDED', rawStatus: 'REFUNDED', status: 'REFUNDED' } : b));
-      showNotice('success', `Đã hoàn vé #${bookingId} thành công. Toàn bộ ghế đã được mở lại cho khách khác.`);
+      showNotice('success', moneyRefunded
+        ? `Đã hoàn ${Number(payment.amount || 0).toLocaleString('vi-VN')}đ qua VNPay và hủy vé #${bookingId}.`
+        : `Đã hủy vé #${bookingId} (đơn không có giao dịch trực tuyến cần hoàn).`);
     } catch (err) {
-      showNotice('error', 'Hoàn vé thất bại: ' + (err.message || 'Không thể hoàn vé đơn này.'));
+      const msg = err.message || 'Không thể hoàn vé đơn này.';
+      showNotice('error', moneyRefunded
+        ? `Đã hoàn tiền nhưng chưa hủy được vé: ${msg}. Bấm Hoàn vé lại để hoàn tất.`
+        : 'Hoàn vé thất bại: ' + msg);
     } finally {
       setActionLoadingId(null);
     }
@@ -139,15 +154,9 @@ export default function BookingsAdminPage() {
         }
       }
 
-      // 4. Date filter (match showtime start date or createdAt)
-      if (dateFilter) {
-        const dateStr = String(b.showtimeStart || b.createdAt || '');
-        if (!dateStr.startsWith(dateFilter)) return false;
-      }
-
       return true;
     });
-  }, [bookings, keyword, statusFilter, checkinFilter, dateFilter]);
+  }, [bookings, keyword, statusFilter, checkinFilter]);
 
   // Reset trang về 1 khi đổi bộ lọc
   useEffect(() => {
@@ -258,6 +267,8 @@ export default function BookingsAdminPage() {
               <option value="PAID">Đã thanh toán (PAID/CONFIRMED)</option>
               <option value="REFUNDED">Đã hoàn tiền (REFUNDED)</option>
               <option value="PAYMENT_PENDING">Chờ thanh toán (PENDING)</option>
+              <option value="USED">Đã soát vé (USED)</option>
+              <option value="CANCELLED">Đã hủy (CANCELLED)</option>
             </select>
           </div>
 
@@ -283,6 +294,7 @@ export default function BookingsAdminPage() {
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <input
               type="date"
+              title="Lọc theo ngày đặt vé"
               value={dateFilter}
               onChange={e => setDateFilter(e.target.value)}
               style={{

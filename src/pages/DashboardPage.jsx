@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import {
   DollarSign, Ticket, Calendar, Users, TrendingUp,
-  Flame, RefreshCw, CheckCircle, RotateCcw, AlertOctagon, CheckSquare
+  Flame, RefreshCw, CheckCircle, RotateCcw, AlertOctagon, CheckSquare, Download
 } from 'lucide-react';
 import { AdminApi } from '../services/adminApi';
+import { exportDashboardReport } from '../services/exportExcel';
 
 export default function DashboardPage() {
   const [stats, setStats] = useState(null);
@@ -43,8 +44,21 @@ export default function DashboardPage() {
 
   const breakdown = stats.statusBreakdown || {};
 
+  const handleExportReport = async () => {
+    try {
+      await exportDashboardReport(stats);
+    } catch (err) {
+      alert('Không thể xuất báo cáo: ' + (err.message || 'Lỗi không xác định'));
+    }
+  };
+
   return (
     <div className="dashboard-page">
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <button className="btn-admin-secondary" onClick={handleExportReport} title="Xuất báo cáo thống kê ra Excel">
+          <Download size={14} /> Xuất báo cáo Excel
+        </button>
+      </div>
       {/* KPI Cards Grid */}
       <div className="dashboard-kpi-grid">
         <div className="kpi-card">

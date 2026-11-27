@@ -355,6 +355,93 @@ export async function exportBookingsToExcel(bookings = []) {
   await saveWorkbook(workbook, 'danh_sach_dat_ve_cgv.xlsx');
 }
 
+// ─── 7. EXPORT BÁO CÁO THỐNG KÊ DASHBOARD (20.4) ───
+export async function exportDashboardReport(stats = {}) {
+  const workbook = new ExcelJS.Workbook();
+  const generatedAt = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+
+  // Sheet 1: Tổng quan
+  const overview = workbook.addWorksheet('Tổng Quan');
+  overview.columns = [
+    { header: 'Chỉ số', key: 'label', width: 36 },
+    { header: 'Giá trị', key: 'value', width: 24 }
+  ];
+  applyHeaderStyle(overview.getRow(1));
+  [
+    ['Thời điểm xuất báo cáo', generatedAt],
+    ['Doanh thu hôm nay (VNĐ)', Number(stats.revenueToday || 0)],
+    ['Doanh thu 7 ngày gần nhất (VNĐ)', Number(stats.revenueThisWeek || 0)],
+    ['Tổng doanh thu (VNĐ)', Number(stats.revenueTotal || 0)],
+    ['Vé bán hôm nay', Number(stats.ticketsSoldToday || 0)],
+    ['Tổng số vé đã bán', Number(stats.ticketsSoldTotal || 0)],
+    ['Đơn đang chờ thanh toán / hiệu lực', Number(stats.activeBookingsCount || 0)]
+  ].forEach(([label, value]) => {
+    const row = overview.addRow({ label, value });
+    if (typeof value === 'number') row.getCell('value').numFmt = '#,##0';
+    applyRowBorder(row);
+  });
+
+  // Sheet 2: Doanh thu theo ngày
+  const daily = workbook.addWorksheet('Doanh Thu Theo Ngày');
+  daily.columns = [
+    { header: 'Ngày', key: 'date', width: 16 },
+    { header: 'Thứ', key: 'day', width: 10 },
+    { header: 'Số đơn', key: 'count', width: 12 },
+    { header: 'Doanh thu (VNĐ)', key: 'amount', width: 22 }
+  ];
+  applyHeaderStyle(daily.getRow(1));
+  (stats.weeklyRevenue || []).forEach(item => {
+    const row = daily.addRow({
+      date: item.date || '',
+      day: item.day || '',
+      count: Number(item.count || 0),
+      amount: Number(item.amount || 0)
+    });
+    row.getCell('amount').numFmt = '#,##0';
+    applyRowBorder(row);
+  });
+
+  // Sheet 3: Top phim
+  const top = workbook.addWorksheet('Top Phim');
+  top.columns = [
+    { header: 'Hạng', key: 'rank', width: 8 },
+    { header: 'Tên phim', key: 'title', width: 40 },
+    { header: 'Số đơn đặt', key: 'bookings', width: 14 },
+    { header: 'Doanh thu (VNĐ)', key: 'revenue', width: 22 }
+  ];
+  applyHeaderStyle(top.getRow(1));
+  (stats.topMovies || []).forEach((m, idx) => {
+    const row = top.addRow({
+      rank: idx + 1,
+      title: m.movieTitle || '',
+      bookings: Number(m.bookingCount || 0),
+      revenue: Number(m.totalAmount || 0)
+    });
+    row.getCell('revenue').numFmt = '#,##0';
+    applyRowBorder(row);
+  });
+
+  // Sheet 4: Trạng thái đơn
+  const statusLabels = {
+    CONFIRMED: 'Đã thanh toán', USED: 'Đã soát vé', REFUNDED: 'Đã hoàn tiền',
+    CANCELLED: 'Đã hủy', PAYMENT_PENDING: 'Chờ thanh toán', SEAT_RESERVED: 'Đang giữ ghế',
+    CANCELLED_DUE_TO_MAINTENANCE: 'Hủy do bảo trì'
+  };
+  const breakdown = workbook.addWorksheet('Trạng Thái Đơn');
+  breakdown.columns = [
+    { header: 'Trạng thái', key: 'status', width: 30 },
+    { header: 'Số đơn', key: 'count', width: 14 }
+  ];
+  applyHeaderStyle(breakdown.getRow(1));
+  Object.entries(stats.statusBreakdown || {}).forEach(([status, count]) => {
+    const row = breakdown.addRow({ status: `${statusLabels[status] || status} (${status})`, count: Number(count || 0) });
+    applyRowBorder(row);
+  });
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  await saveWorkbook(workbook, `bao_cao_thong_ke_cgv_${stamp}.xlsx`);
+}
+
 // ─── 6. EXPORT SEATS (SƠ ĐỒ GHẾ) ───
 export async function exportSeatsToExcel(seats = [], roomName = '') {
   const workbook = new ExcelJS.Workbook();

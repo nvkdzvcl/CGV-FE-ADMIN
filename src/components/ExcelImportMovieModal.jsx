@@ -15,6 +15,7 @@ const HEADER_ALIASES = {
   releaseDate: ['releasedate', 'release_date', 'ngàykhởichiếu', 'ngaykhoichieu', 'khởichiếu', 'khoichieu', 'ngàychiếu'],
   genreNames: ['genrenames', 'genre_names', 'genres', 'genre', 'thểloại', 'theloai'],
   language: ['language', 'ngônngữ', 'ngonngu'],
+  country: ['country', 'quốcgia', 'quocgia', 'nation'],
   isFeatured: ['isfeatured', 'is_featured', 'nổibật', 'noibat', 'featured'],
   posterUrl: ['posterurl', 'poster_url', 'poster'],
   trailerYoutubeUrl: ['traileryoutubeurl', 'trailer_youtube_url', 'trailer', 'youtube'],
@@ -166,6 +167,7 @@ function parseAndValidateMovieRows(rawRows) {
       trailerYoutubeUrl: String(obj.trailerYoutubeUrl ?? '').trim(),
       synopsis: String(obj.synopsis ?? '').trim(),
       language: String(obj.language ?? 'Tiếng Việt').trim(),
+      country: String(obj.country ?? '').trim(),
       isFeatured: normalizeFeatured(obj.isFeatured),
       status: 'ACTIVE',
       cast: (obj.cast_names || obj.cast) ? String(obj.cast_names || obj.cast).split(';').map((name, idx) => ({
@@ -253,6 +255,7 @@ export default function ExcelImportMovieModal({ onClose, onImportComplete }) {
             trailerYoutubeUrl: row.trailerYoutubeUrl,
             synopsis: row.synopsis,
             language: row.language,
+            country: row.country,
             isFeatured: row.isFeatured,
             status: row.status,
             cast: row.cast,
