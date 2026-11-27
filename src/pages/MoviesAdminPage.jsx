@@ -8,6 +8,7 @@ import ExcelImportMovieModal from '../components/ExcelImportMovieModal';
 import { AdminApi } from '../services/adminApi';
 import { exportMoviesToExcel } from '../services/exportExcel';
 import { realtime, REALTIME_EVENTS } from '../services/realtimeService';
+import { vietnamToday } from '../services/showtimeSlots';
 
 export default function MoviesAdminPage() {
   const [movies, setMovies] = useState([]);
@@ -108,6 +109,13 @@ export default function MoviesAdminPage() {
   };
 
   const handleShowingStatusToggle = async (movie, newStatus) => {
+    const today = vietnamToday();
+    const expected = movie.endDate && movie.endDate < today ? 'ENDED'
+      : movie.releaseDate > today ? 'COMING_SOON' : 'NOW_SHOWING';
+    if (!movie.releaseDate || (movie.endDate && movie.endDate < movie.releaseDate) || newStatus !== expected) {
+      showNotice('error', 'Trạng thái phải khớp ngày khởi/kết thúc chiếu. Hãy sửa ngày trong thông tin phim.');
+      return;
+    }
     try {
       await AdminApi.updateMovieShowingStatus(movie.id, newStatus, movie.title);
       setMovies(prev => prev.map(m => m.id === movie.id ? { ...m, showingStatus: newStatus } : m));

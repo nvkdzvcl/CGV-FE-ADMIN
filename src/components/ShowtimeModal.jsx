@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { X, Calendar, AlertTriangle, Check, Search, Film, Clock, ShieldAlert, Sparkles, ChevronDown } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { X, Calendar, AlertTriangle, Check, Search, Film, Clock } from 'lucide-react';
 import { AdminApi } from '../services/adminApi';
+import { availableStartTimes, endTimeFor, vietnamToday } from '../services/showtimeSlots';
 
 const AGE_RATING_CONFIG = {
   P: { label: 'P - Phổ biến', color: '#22c55e', bg: 'rgba(34,197,94,0.15)', desc: 'Mọi lứa tuổi' },
@@ -24,12 +25,11 @@ export default function ShowtimeModal({
 
   const [cinemaId, setCinemaId] = useState(cinemas[0]?.id || '');
   const [rooms, setRooms] = useState([]);
-  const [roomId, setRoomId] = useState('');
+  const [requestedRoomId, setRoomId] = useState('');
   const [loadingRooms, setLoadingRooms] = useState(false);
 
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [startTime, setStartTime] = useState('19:00');
-  const [endTime, setEndTime] = useState('21:15');
+  const [date, setDate] = useState(vietnamToday);
+  const [requestedStartTime, setStartTime] = useState('');
   const [basePrice, setBasePrice] = useState(90000);
   const [conflictError, setConflictError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -56,15 +56,21 @@ export default function ShowtimeModal({
 
   const selectedCinema = cinemas.find(c => c.id === cinemaId) || cinemas[0] || { name: 'CGV Cinema' };
 
-  // Auto-calculate end time based on movie duration + 15 mins cleanup
-  const calculateEndTime = (start, durationMins) => {
-    if (!start) return '';
-    const [h, m] = start.split(':').map(Number);
-    const totalMinutes = h * 60 + m + (Number(durationMins) || 120) + 15;
-    const endH = Math.floor((totalMinutes / 60) % 24);
-    const endM = totalMinutes % 60;
-    return `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
-  };
+  const duration = selectedMovie?.duration || selectedMovie?.durationMinutes || 120;
+  const minDate = selectedMovie?.releaseDate && selectedMovie.releaseDate > vietnamToday()
+    ? selectedMovie.releaseDate : vietnamToday();
+  const invalidMoviePeriod = selectedMovie?.endDate && selectedMovie?.releaseDate
+    && selectedMovie.endDate < selectedMovie.releaseDate;
+  const availableRooms = useMemo(() => rooms.map(room => ({
+    ...room,
+    slots: room.status === 'MAINTENANCE' ? [] : availableStartTimes(date, room.id, duration, existingShowtimes)
+  })), [rooms, date, duration, existingShowtimes]);
+  const roomId = availableRooms.some(room => String(room.id) === String(requestedRoomId) && room.slots.length)
+    ? requestedRoomId : (availableRooms.find(room => room.slots.length)?.id || '');
+  const freeTimes = useMemo(() => availableRooms.find(room => String(room.id) === String(roomId))?.slots || [],
+    [availableRooms, roomId]);
+  const startTime = freeTimes.includes(requestedStartTime) ? requestedStartTime : (freeTimes[0] || '');
+  const endTime = startTime ? endTimeFor(startTime, duration) : '';
 
   // Fetch rooms whenever cinemaId changes
   useEffect(() => {
@@ -74,7 +80,7 @@ export default function ShowtimeModal({
       .then(fetchedRooms => {
         if (Array.isArray(fetchedRooms) && fetchedRooms.length > 0) {
           setRooms(fetchedRooms);
-          setRoomId(fetchedRooms[0].id);
+          setRoomId('');
         } else {
           setRooms([]);
           setRoomId('');
@@ -88,26 +94,12 @@ export default function ShowtimeModal({
       .finally(() => setLoadingRooms(false));
   }, [cinemaId]);
 
-  const handleStartTimeChange = (newStartTime) => {
-    setStartTime(newStartTime);
-    const dur = selectedMovie?.duration || selectedMovie?.durationMinutes || 120;
-    const end = calculateEndTime(newStartTime, dur);
-    if (end) setEndTime(end);
-  };
-
   const handleSelectMovie = (movie) => {
     setSelectedMovie(movie);
     setIsSearchOpen(false);
     setMovieSearch('');
-    if (startTime) {
-      const dur = movie.duration || movie.durationMinutes || 120;
-      const end = calculateEndTime(startTime, dur);
-      if (end) setEndTime(end);
-    }
     // Ngăn chặn chọn ngày trước ngày khởi chiếu: tự động nhảy đến ngày khởi chiếu nếu ngày hiện tại trước ngày phát hành
-    if (movie.releaseDate && date < movie.releaseDate) {
-      setDate(movie.releaseDate);
-    }
+    if (movie.releaseDate && date < movie.releaseDate) setDate(movie.releaseDate);
   };
 
   const handleSubmit = async (e) => {
@@ -128,14 +120,20 @@ export default function ShowtimeModal({
       setConflictError(`Không thể tạo suất chiếu trước ngày khởi chiếu! Phim "${selectedMovie.title}" dự kiến khởi chiếu từ ngày ${selectedMovie.releaseDate}.`);
       return;
     }
+    if (invalidMoviePeriod || (selectedMovie.endDate && date > selectedMovie.endDate)) {
+      setConflictError('Ngày chiếu nằm ngoài thời gian phát hành phim. Hãy sửa ngày kết thúc chiếu trong mục Quản lý Phim.');
+      return;
+    }
+    if (!freeTimes.includes(startTime)) {
+      setConflictError('Giờ/phòng vừa chọn không còn trống. Hãy chọn khung giờ khác.');
+      return;
+    }
 
     // Local overlap check
     const conflict = existingShowtimes.find(st => {
       const matchRoom = String(st.roomId) === String(roomId);
       const matchDate = st.date === date || st.showDate === date;
-      const isOverlap = (startTime >= st.startTime && startTime < st.endTime) ||
-                        (endTime > st.startTime && endTime <= st.endTime);
-      return matchRoom && matchDate && isOverlap;
+      return matchRoom && matchDate && st.status !== 'CANCELLED' && startTime < st.endTime && endTime > st.startTime;
     });
 
     if (conflict) {
@@ -147,7 +145,9 @@ export default function ShowtimeModal({
 
     // Build payload conforming to CatalogService ShowtimeCreateRequest (Instant UTC ISO-8601)
     const startIso = new Date(`${date}T${startTime}:00+07:00`).toISOString();
-    const endIso = new Date(`${date}T${endTime}:00+07:00`).toISOString();
+    const end = new Date(`${date}T${endTime}:00+07:00`);
+    if (endTime < startTime) end.setUTCDate(end.getUTCDate() + 1);
+    const endIso = end.toISOString();
 
     const showtimeData = {
       movieId: selectedMovie.id,
@@ -157,7 +157,7 @@ export default function ShowtimeModal({
       endTime: endIso,
       basePrice: Number(basePrice),
       status: 'SCHEDULED', // Valid backend enum: SCHEDULED, CANCELLED, COMPLETED
-      viewingMode: (room?.format === '3D') ? 'THREE_D' : 'TWO_D',
+      viewingMode: selectedMovie.supportedModes?.includes('DUBBED') && !selectedMovie.supportedModes.includes('SUBTITLED') ? 'DUBBED' : 'SUBTITLED',
       format: room?.format || '2D',
       movieTitle: selectedMovie?.title || 'Phim CGV',
       cinemaName: selectedCinema?.name || 'CGV Cinema',
@@ -378,6 +378,9 @@ export default function ShowtimeModal({
                           📅 Khởi chiếu: {selectedMovie.releaseDate}
                         </span>
                       )}
+                      <span style={{ fontSize: '0.75rem', color: invalidMoviePeriod ? '#f87171' : '#38bdf8' }}>
+                        Kết thúc chiếu: {selectedMovie.endDate || 'Chưa xác định'}
+                      </span>
                     </div>
 
                     <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: 6 }}>
@@ -408,18 +411,21 @@ export default function ShowtimeModal({
                   value={roomId}
                   onChange={e => setRoomId(e.target.value)}
                   style={{
-                    borderColor: rooms.length > 0 ? 'var(--admin-border)' : '#f59e0b',
+                    borderColor: availableRooms.some(room => room.slots.length) ? 'var(--admin-border)' : '#f59e0b',
                     color: '#fff'
                   }}
                 >
-                  {rooms.length === 0 ? (
-                    <option value="" disabled>Chưa có phòng chiếu (Vui lòng thêm phòng vào cụm rạp trước)</option>
+                  {availableRooms.length === 0 ? (
+                    <option value="">Chưa có phòng chiếu</option>
                   ) : (
-                    rooms.map(r => (
-                      <option key={r.id} value={r.id}>
-                        {r.name} — ({r.format || '2D'}, {r.capacity || r.totalSeats || 120} ghế)
+                    <>
+                      {!availableRooms.some(room => room.slots.length) && <option value="">Không còn phòng/giờ trống ngày này</option>}
+                      {availableRooms.map(r => (
+                      <option key={r.id} value={r.id} disabled={!r.slots.length || r.status === 'MAINTENANCE'}>
+                        {r.name} — {r.format || '2D'} · {r.slots.length} giờ trống{r.status === 'MAINTENANCE' ? ' (bảo trì)' : ''}
                       </option>
-                    ))
+                      ))}
+                    </>
                   )}
                 </select>
               </div>
@@ -432,7 +438,7 @@ export default function ShowtimeModal({
                   <span>Ngày chiếu *</span>
                   {selectedMovie?.releaseDate && (
                     <span style={{ fontSize: '0.74rem', color: '#38bdf8' }}>
-                      (Khởi chiếu từ: {selectedMovie.releaseDate})
+                      {selectedMovie.releaseDate} – {selectedMovie.endDate || 'chưa có ngày kết thúc'}
                     </span>
                   )}
                 </label>
@@ -440,9 +446,13 @@ export default function ShowtimeModal({
                   type="date"
                   required
                   value={date}
-                  min={selectedMovie?.releaseDate || new Date().toISOString().split('T')[0]}
+                  min={minDate}
+                  max={selectedMovie?.endDate || undefined}
                   onChange={e => setDate(e.target.value)}
                 />
+                {invalidMoviePeriod && <span style={{ color: '#f87171', fontSize: '0.78rem' }}>
+                  Ngày kết thúc trước ngày khởi chiếu. Sửa phim trước khi xếp lịch.
+                </span>}
               </div>
               <div className="form-field">
                 <label>Giá vé sàn (base_price VND) *</label>
@@ -457,13 +467,16 @@ export default function ShowtimeModal({
                 <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   <Clock size={13} /> Giờ bắt đầu *
                 </label>
-                <input type="time" required value={startTime} onChange={e => handleStartTimeChange(e.target.value)} />
+                <select required value={startTime} onChange={e => setStartTime(e.target.value)} disabled={!freeTimes.length}>
+                  {!freeTimes.length && <option value="">Không có khung giờ trống</option>}
+                  {freeTimes.map(time => <option key={time} value={time}>{time} – {endTimeFor(time, duration)}</option>)}
+                </select>
               </div>
               <div className="form-field">
                 <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   <Clock size={13} /> Giờ kết thúc (tự động tính + 15p dọn phòng)
                 </label>
-                <input type="time" required value={endTime} onChange={e => setEndTime(e.target.value)} />
+                <input type="time" readOnly value={endTime} />
               </div>
             </div>
           </div>
@@ -472,7 +485,7 @@ export default function ShowtimeModal({
             <button type="button" className="btn-admin-secondary" onClick={onClose} disabled={submitting}>
               Hủy
             </button>
-            <button type="submit" className="btn-admin-primary" disabled={submitting || !roomId}>
+            <button type="submit" className="btn-admin-primary" disabled={submitting || !roomId || !startTime || invalidMoviePeriod || (selectedMovie?.endDate && date > selectedMovie.endDate)}>
               <Check size={16} /> {submitting ? 'Đang lưu...' : 'Lưu suất chiếu'}
             </button>
           </div>

@@ -164,6 +164,9 @@ export default function ShowtimesAdminPage() {
   const handleSaveShowtime = async (newShowtime) => {
     try {
       await AdminApi.createShowtime(newShowtime);
+      handleResetFilters();
+      setSelectedDate(newShowtime.showDate);
+      setSelectedMovieId(newShowtime.movieId);
       showNotice('success', 'Đã xếp lịch suất chiếu mới thành công!');
       loadData();
     } catch (err) {
