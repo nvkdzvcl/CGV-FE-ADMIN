@@ -229,8 +229,9 @@ export default function PromotionsAdminPage() {
             >
               <option value="ALL">👑 Mọi hạng thành viên</option>
               <option value="MEMBER">Hạng MEMBER</option>
-              <option value="VIP">Hạng VIP</option>
-              <option value="VVIP">Hạng VVIP</option>
+              <option value="SILVER">Hạng SILVER</option>
+              <option value="GOLD">Hạng GOLD</option>
+              <option value="PLATINUM">Hạng PLATINUM</option>
             </select>
           </div>
 

@@ -707,8 +707,9 @@ export default function UsersAdminPage() {
               >
                 <option value="ALL">👑 Mọi hạng thành viên</option>
                 <option value="MEMBER">MEMBER</option>
-                <option value="VIP">VIP</option>
-                <option value="VVIP">VVIP</option>
+                <option value="SILVER">SILVER</option>
+                <option value="GOLD">GOLD</option>
+                <option value="PLATINUM">PLATINUM</option>
               </select>
             )}
 

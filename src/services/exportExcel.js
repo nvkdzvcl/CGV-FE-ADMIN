@@ -238,11 +238,11 @@ export async function exportPromotionsToExcel(promotions = []) {
       error: 'Vui lòng chọn: FIXED (Số tiền) hoặc PERCENT (Phần trăm %)'
     };
 
-    // Hạng áp dụng: ALL, MEMBER, VIP, VVIP
+    // Hạng áp dụng: ALL, MEMBER, SILVER, GOLD, PLATINUM (enum MembershipTier của backend)
     ws.getCell('G' + r).dataValidation = {
       type: 'list',
       allowBlank: true,
-      formulae: ['"ALL,MEMBER,VIP,VVIP"']
+      formulae: ['"ALL,MEMBER,SILVER,GOLD,PLATINUM"']
     };
 
     // Trạng thái: KÍCH HOẠT, TẠM KHÓA
@@ -300,7 +300,7 @@ export async function exportUsersToExcel(users = []) {
     ws.getCell('F' + r).dataValidation = {
       type: 'list',
       allowBlank: true,
-      formulae: ['"MEMBER,VIP,VVIP"']
+      formulae: ['"MEMBER,SILVER,GOLD,PLATINUM"']
     };
     ws.getCell('I' + r).dataValidation = {
       type: 'list',
@@ -639,8 +639,8 @@ export async function downloadVoucherImportTemplate() {
 
   const samples = [
     { code: 'CGVFLASH50K', name: 'Voucher Flash Sale 50K', discountType: 'FIXED', discountValue: 50000, minOrderValue: 150000, applicableTier: 'MEMBER', usageLimit: 5000, validFrom: '2026-09-24', validTo: '2026-10-31' },
-    { code: 'CGVIP30PCT', name: 'Giảm 30% VIP Weekend', discountType: 'PERCENT', discountValue: 30, minOrderValue: 200000, applicableTier: 'VIP', usageLimit: 1000, validFrom: '2026-09-24', validTo: '2026-12-31' },
-    { code: 'CGVVVIP100K', name: 'Tri Ân VVIP Bạch Kim', discountType: 'FIXED', discountValue: 100000, minOrderValue: 250000, applicableTier: 'VVIP', usageLimit: 500, validFrom: '2026-09-24', validTo: '2026-12-31' }
+    { code: 'CGVIP30PCT', name: 'Giảm 30% VIP Weekend', discountType: 'PERCENT', discountValue: 30, minOrderValue: 200000, applicableTier: 'GOLD', usageLimit: 1000, validFrom: '2026-09-24', validTo: '2026-12-31' },
+    { code: 'CGVVVIP100K', name: 'Tri Ân VVIP Bạch Kim', discountType: 'FIXED', discountValue: 100000, minOrderValue: 250000, applicableTier: 'PLATINUM', usageLimit: 500, validFrom: '2026-09-24', validTo: '2026-12-31' }
   ];
 
   samples.forEach(s => {
@@ -660,7 +660,7 @@ export async function downloadVoucherImportTemplate() {
     ws.getCell('F' + r).dataValidation = {
       type: 'list',
       allowBlank: true,
-      formulae: ['"ALL,MEMBER,VIP,VVIP"']
+      formulae: ['"ALL,MEMBER,SILVER,GOLD,PLATINUM"']
     };
   }
 
