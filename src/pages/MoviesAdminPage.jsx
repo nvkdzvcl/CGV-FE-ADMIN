@@ -126,6 +126,17 @@ export default function MoviesAdminPage() {
     }
   };
 
+  const handleDeleteMovie = async (movie) => {
+    if (!window.confirm(`Xóa vĩnh viễn phim "${movie.title}"? Chỉ xóa được phim chưa có suất chiếu nào.`)) return;
+    try {
+      await AdminApi.deleteMovie(movie.id);
+      setMovies(prev => prev.filter(m => m.id !== movie.id));
+      showNotice('success', `Đã xóa phim "${movie.title}".`);
+    } catch (err) {
+      showNotice('error', 'Không thể xóa phim: ' + err.message);
+    }
+  };
+
   const handleSaveMovie = async (savedData) => {
     try {
       if (editingMovie) {
@@ -339,7 +350,7 @@ export default function MoviesAdminPage() {
                       <div style={{ fontSize: '0.78rem', color: 'var(--admin-text-muted)' }}>{m.originalTitle}</div>
                     </td>
                     <td>{m.duration} phút</td>
-                    <td><span className="status-pill info">{m.ageRating}</span></td>
+                    <td>{m.ageRating ? <span className="status-pill info">{m.ageRating}</span> : <span style={{ color: 'var(--admin-text-muted)' }}>Chưa phân loại</span>}</td>
                     <td>{m.genre}</td>
                     <td>{m.releaseDate}</td>
                     <td>
@@ -362,6 +373,9 @@ export default function MoviesAdminPage() {
                       <div className="table-action-btns">
                         <button className="btn-table-icon" onClick={() => handleOpenEdit(m)} title="Chỉnh sửa">
                           <Edit2 size={15} />
+                        </button>
+                        <button className="btn-table-icon delete" onClick={() => handleDeleteMovie(m)} title="Xóa phim">
+                          <Trash2 size={15} />
                         </button>
                       </div>
                     </td>

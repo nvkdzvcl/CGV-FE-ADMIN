@@ -72,6 +72,10 @@ function parseDateFlexible(val) {
   return '';
 }
 
+// Enum MembershipTier của backend; VIP/VVIP là tên cũ trong file mẫu trước đây
+const VALID_TIERS = ['ALL', 'MEMBER', 'SILVER', 'GOLD', 'PLATINUM'];
+const LEGACY_TIER_MAP = { VIP: 'GOLD', VVIP: 'PLATINUM' };
+
 export default function ExcelImportVoucherModal({ onClose, onImportDone }) {
   const [file, setFile] = useState(null);
   const [parsedRows, setParsedRows] = useState([]);
@@ -104,6 +108,7 @@ export default function ExcelImportVoucherModal({ onClose, onImportDone }) {
         }
 
         const rows = [];
+        const invalidTierRows = [];
         for (let i = 0; i < rawJson.length; i++) {
           const item = rawJson[i];
           const obj = {};
@@ -117,7 +122,11 @@ export default function ExcelImportVoucherModal({ onClose, onImportDone }) {
           const discType = String(obj.discountType ?? 'FIXED').toUpperCase().includes('PERCENT') ? 'PERCENT' : 'FIXED';
           const discVal = Number(String(obj.discountValue ?? '0').replace(/[^0-9]/g, '')) || 0;
           const minOrder = Number(String(obj.minOrderValue ?? '0').replace(/[^0-9]/g, '')) || 0;
-          const tier = String(obj.applicableTier ?? 'MEMBER').trim().toUpperCase() || 'MEMBER';
+          const rawTier = String(obj.applicableTier ?? 'ALL').trim().toUpperCase() || 'ALL';
+          const tier = LEGACY_TIER_MAP[rawTier] || rawTier;
+          if (!VALID_TIERS.includes(tier)) {
+            invalidTierRows.push(`${code || '(không mã)'}: ${rawTier}`);
+          }
           const limit = Number(String(obj.usageLimit ?? '1000').replace(/[^0-9]/g, '')) || 1000;
           const vFrom = parseDateFlexible(obj.validFrom) || new Date().toISOString().split('T')[0];
           const vTo = parseDateFlexible(obj.validTo) || '2026-12-31';
@@ -135,6 +144,11 @@ export default function ExcelImportVoucherModal({ onClose, onImportDone }) {
               validTo: vTo
             });
           }
+        }
+
+        if (invalidTierRows.length > 0) {
+          setErrorMsg(`Hạng áp dụng không hợp lệ (${invalidTierRows.join(', ')}). Chỉ dùng: ${VALID_TIERS.join(', ')}.`);
+          return;
         }
 
         if (rows.length === 0) {

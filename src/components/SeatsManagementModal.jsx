@@ -262,18 +262,24 @@ export default function SeatsManagementModal({ room, onClose }) {
     }
     if (!window.confirm(`Gỡ bỏ ${selectedSeats.size} ô ghế này khỏi sơ đồ phòng chiếu? (Thao tác này chỉ dùng khi tháo dỡ ghế tạo lối đi/khoảng trống)`)) return;
     setSaving(true);
-    let ok = 0;
+    const deletedIds = new Set();
+    let lastError = '';
     for (const seatId of selectedSeats) {
       try {
         await AdminApi.deleteSeat(seatId);
-        ok++;
-      } catch {
-        ok++;
+        deletedIds.add(seatId);
+      } catch (err) {
+        lastError = err.message;
       }
     }
-    // Remove from local state
-    setSeats(prev => prev.filter(s => !selectedSeats.has(s.id)));
-    showNotice('success', `Đã gỡ bỏ ${ok} ô ghế khỏi sơ đồ.`);
+    // Chỉ gỡ khỏi state những ghế backend đã xóa thật
+    setSeats(prev => prev.filter(s => !deletedIds.has(s.id)));
+    const failed = selectedSeats.size - deletedIds.size;
+    if (failed === 0) {
+      showNotice('success', `Đã gỡ bỏ ${deletedIds.size} ô ghế khỏi sơ đồ.`);
+    } else {
+      showNotice('error', `Đã gỡ ${deletedIds.size} ghế, ${failed} ghế không xóa được: ${lastError}`);
+    }
     clearSelection();
     setSaving(false);
   };

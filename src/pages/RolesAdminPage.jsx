@@ -2,19 +2,32 @@ import React, { useState, useEffect } from 'react';
 import { Shield, Plus, Trash2, Pencil, RefreshCw, CheckCircle, AlertCircle, X, Check, Users, Key, Search } from 'lucide-react';
 import { AdminApi } from '../services/adminApi';
 
-const SYSTEM_ROLES = [
-  { name: 'SUPER_ADMIN', description: 'Quản trị viên tối cao — toàn quyền hệ thống', isSystem: true },
-  { name: 'CINEMA_MANAGER', description: 'Quản lý cụm rạp — quản lý phim, lịch chiếu, phòng chiếu', isSystem: true },
-  { name: 'TICKET_STAFF', description: 'Nhân viên soát vé — truy cập trang soát vé QR', isSystem: true },
-  { name: 'USER', description: 'Khách hàng thông thường — đặt vé, xem lịch chiếu', isSystem: true },
-];
-
-const PERMISSION_MAP = {
-  SUPER_ADMIN: ['movie:manage', 'cinema:manage', 'showtime:manage', 'promotion:manage', 'user:manage', 'booking:admin', 'role:manage'],
-  CINEMA_MANAGER: ['movie:manage', 'cinema:manage', 'showtime:manage', 'promotion:manage', 'booking:admin'],
-  TICKET_STAFF: ['booking:checkin'],
-  USER: ['booking:create', 'booking:read'],
+// Role nghiệp vụ có sẵn trong realm cgv-realm (không cho xóa); mô tả tiếng Việt để hiển thị
+const SYSTEM_ROLE_DESCRIPTIONS = {
+  SUPER_ADMIN: 'Ban giám đốc, CTO, quản trị hệ thống — toàn quyền',
+  CINEMA_MANAGER: 'Quản lý cụm rạp — phòng chiếu, suất chiếu, hoàn vé, báo cáo',
+  TICKET_STAFF: 'Nhân viên quầy vé — bán vé và soát vé QR',
+  CONTENT_MANAGER: 'Quản lý nội dung — phim, banner, tin tức và khuyến mãi',
+  MEMBER_USER: 'Thành viên CGV — role mặc định khi đăng ký tài khoản',
 };
+
+// Mô tả tiếng Việt cho các quyền chi tiết (Keycloak đang lưu mô tả không dấu)
+const PERMISSION_DESCRIPTIONS = {
+  'ticket:view': 'Xem danh sách, chi tiết vé đã đặt và soát vé QR',
+  'ticket:book': 'Đặt vé, giữ ghế và thanh toán vé xem phim',
+  'ticket:refund': 'Hủy vé và xử lý hoàn tiền cho khách hàng',
+  'showtime:manage': 'Tạo và xếp lịch chiếu, điều phối giờ chiếu',
+  'cinema:manage': 'Quản lý cụm rạp, phòng chiếu, ma trận ghế và tiện ích rạp',
+  'movie:manage': 'Thêm, sửa, xóa thông tin phim, thể loại, diễn viên',
+  'content:manage': 'Quản lý banner, quảng cáo, tin tức và sự kiện',
+  'promotion:manage': 'Quản lý mã giảm giá, voucher và chiến dịch marketing',
+  'user:manage': 'Khóa, mở khóa và quản lý tài khoản người dùng',
+  'report:view': 'Xem báo cáo thống kê doanh thu và tỷ lệ lấp đầy rạp',
+};
+
+// Role kỹ thuật do Keycloak tự tạo — không phải role nghiệp vụ
+const isKeycloakBuiltin = (name = '') =>
+  name === 'offline_access' || name === 'uma_authorization' || name.startsWith('default-roles-');
 
 function Toast({ notification }) {
   if (!notification) return null;
@@ -35,6 +48,7 @@ function Toast({ notification }) {
 
 export default function RolesAdminPage() {
   const [roles, setRoles] = useState([]);
+  const [permsByRole, setPermsByRole] = useState({});
   const [loading, setLoading] = useState(false);
   const [notification, setNotification] = useState(null);
   const [addModal, setAddModal] = useState(false);
@@ -55,13 +69,25 @@ export default function RolesAdminPage() {
   const loadRoles = async () => {
     setLoading(true);
     try {
-      const list = await AdminApi.getRoles();
-      // Merge with system roles
-      const systemNames = SYSTEM_ROLES.map(r => r.name);
-      const apiRoles = list.map(r => ({ ...r, isSystem: systemNames.includes(r.name) }));
-      const existingNames = apiRoles.map(r => r.name);
-      const missingSystem = SYSTEM_ROLES.filter(r => !existingNames.includes(r.name));
-      setRoles([...apiRoles, ...missingSystem]);
+      const list = (await AdminApi.getRoles()) || [];
+      const apiRoles = list
+        .filter(r => !isKeycloakBuiltin(r.name))
+        .map(r => ({
+          ...r,
+          isSystem: Boolean(SYSTEM_ROLE_DESCRIPTIONS[r.name]),
+          description: SYSTEM_ROLE_DESCRIPTIONS[r.name] || PERMISSION_DESCRIPTIONS[r.name] || r.description,
+        }))
+        // Role nghiệp vụ lên trước, quyền chi tiết (dạng "x:y") phía sau
+        .sort((a, b) => Number(b.isSystem) - Number(a.isSystem) || a.name.localeCompare(b.name));
+      setRoles(apiRoles);
+
+      // Quyền con thật của các role tổng hợp (Keycloak composite roles)
+      const composites = await Promise.all(apiRoles
+        .filter(r => r.composite)
+        .map(r => AdminApi.getRoleComposites(r.name)
+          .then(names => [r.name, (names || []).filter(n => !isKeycloakBuiltin(n))])
+          .catch(() => [r.name, []])));
+      setPermsByRole(Object.fromEntries(composites));
     } catch (err) {
       setRoles([]);
       showNotice('error', 'Không tải được vai trò: ' + err.message);
@@ -220,7 +246,7 @@ export default function RolesAdminPage() {
           const q = searchKeyword.toLowerCase().trim();
           return r.name?.toLowerCase().includes(q) || r.description?.toLowerCase().includes(q);
         }).map(role => {
-          const perms = PERMISSION_MAP[role.name] || [];
+          const perms = permsByRole[role.name] || [];
           return (
             <div key={role.name} style={{
               padding: '20px', borderRadius: 12,

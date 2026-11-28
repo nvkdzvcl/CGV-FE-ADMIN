@@ -48,17 +48,58 @@ export default function PaymentsAdminPage() {
     setTimeout(() => setNotification(null), 4000);
   };
 
+  // Detail / reconcile state
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [reconcileResult, setReconcileResult] = useState(null);
+  const [reconciling, setReconciling] = useState(false);
+
   const loadPaymentsData = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await AdminApi.getPayments();
+      // Lọc trạng thái / cổng / ngày ngay trên payment-service
+      const data = await AdminApi.getPayments({
+        status: statusFilter === 'ALL' ? null : statusFilter,
+        provider: providerFilter === 'ALL' ? null : providerFilter,
+        fromDate: dateFilter || null,
+        toDate: dateFilter || null,
+      });
       setPayments(Array.isArray(data) ? data : []);
     } catch (err) {
-      showNotice('error', 'Lỗi tải danh sách đối soát thanh toán: ' + err.message);
+      showNotice('error', 'Lỗi tải danh sách giao dịch: ' + err.message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [statusFilter, providerFilter, dateFilter]);
+
+  const openDetail = async (payment) => {
+    setSelectedPayment(payment);
+    setReconcileResult(null);
+    setDetailLoading(true);
+    try {
+      const detail = await AdminApi.getPaymentDetail(payment.id);
+      setSelectedPayment(detail);
+    } catch (err) {
+      showNotice('error', 'Không tải được chi tiết giao dịch: ' + err.message);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const handleReconcileOne = async () => {
+    if (!selectedPayment) return;
+    setReconciling(true);
+    try {
+      const result = await AdminApi.reconcilePayment(selectedPayment.id);
+      setReconcileResult(result);
+      showNotice(result?.matched ? 'success' : 'error', result?.message || 'Đã đối soát');
+      const detail = await AdminApi.getPaymentDetail(selectedPayment.id);
+      setSelectedPayment(detail);
+    } catch (err) {
+      showNotice('error', 'Đối soát thất bại: ' + err.message);
+    } finally {
+      setReconciling(false);
+    }
+  };
 
   useEffect(() => {
     loadPaymentsData();
@@ -66,27 +107,9 @@ export default function PaymentsAdminPage() {
     // Realtime listeners
     const unsubscribe = realtime.subscribe((msg) => {
       if (msg.type === REALTIME_EVENTS.PAYMENT_CONFIRMED) {
-        const bookingId = msg.payload?.bookingId;
-        if (bookingId) {
-          setPayments(prev => {
-            const exists = prev.some(p => p.bookingId === bookingId);
-            if (exists) {
-              return prev.map(p => p.bookingId === bookingId ? { ...p, status: 'SUCCESS' } : p);
-            }
-            return [
-              {
-                id: `pay-${bookingId}`,
-                bookingId,
-                provider: msg.payload?.provider || 'VNPAY',
-                transactionId: msg.payload?.transactionId || `TXN-REALTIME-${Date.now()}`,
-                amount: Number(msg.payload?.amount || 0),
-                status: 'SUCCESS',
-                createdAt: new Date().toLocaleString('vi-VN')
-              },
-              ...prev
-            ];
-          });
-          showNotice('success', `Realtime: Giao dịch đơn #${bookingId} đã thanh toán thành công!`);
+        loadPaymentsData();
+        if (msg.payload?.bookingId) {
+          showNotice('success', `Realtime: Giao dịch đơn #${msg.payload.bookingId} đã thanh toán thành công!`);
         }
       }
     });
@@ -104,20 +127,6 @@ export default function PaymentsAdminPage() {
       window.removeEventListener('cgv_realtime_payment_confirmed', handleWindowPayment);
     };
   }, [loadPaymentsData]);
-
-  // Handle Sync / Webhook Check
-  const handleSyncWebhook = async () => {
-    setSyncing(true);
-    try {
-      await new Promise(r => setTimeout(r, 700));
-      await loadPaymentsData();
-      showNotice('success', 'Đã đối soát chữ ký số HMAC-SHA512 thành công với cổng VNPAY & MoMo!');
-    } catch (err) {
-      showNotice('error', 'Lỗi kiểm tra đối soát webhook: ' + err.message);
-    } finally {
-      setSyncing(false);
-    }
-  };
 
   // Filtered payments
   const filteredPayments = useMemo(() => {
@@ -142,6 +151,7 @@ export default function PaymentsAdminPage() {
         if (statusFilter === 'PENDING' && pStatus !== 'PENDING') return false;
         if (statusFilter === 'FAILED' && pStatus !== 'FAILED') return false;
         if (statusFilter === 'REFUNDED' && pStatus !== 'REFUNDED') return false;
+        if (statusFilter === 'REFUND_PENDING' && pStatus !== 'REFUND_PENDING') return false;
       }
       // Date
       if (dateFilter) {
@@ -151,6 +161,33 @@ export default function PaymentsAdminPage() {
       return true;
     });
   }, [payments, keyword, providerFilter, statusFilter, dateFilter]);
+
+  // Đối soát hàng loạt các giao dịch VNPay chưa chốt (PENDING / REFUND_PENDING) đang hiển thị
+  const handleSyncWebhook = async () => {
+    const targets = filteredPayments
+      .filter(p => p.provider === 'VNPAY' && (p.status === 'PENDING' || p.status === 'REFUND_PENDING'))
+      .slice(0, 20);
+    if (targets.length === 0) {
+      showNotice('success', 'Không có giao dịch VNPay nào đang chờ cần đối soát.');
+      return;
+    }
+    setSyncing(true);
+    let matched = 0;
+    let mismatched = 0;
+    let failed = 0;
+    for (const p of targets) {
+      try {
+        const r = await AdminApi.reconcilePayment(p.id);
+        if (r?.matched) matched++; else mismatched++;
+      } catch {
+        failed++;
+      }
+    }
+    setSyncing(false);
+    await loadPaymentsData();
+    const summary = `Đối soát ${targets.length} giao dịch: ${matched} khớp, ${mismatched} lệch, ${failed} lỗi gọi VNPay.`;
+    showNotice(mismatched + failed > 0 ? 'error' : 'success', summary);
+  };
 
   // Reset page when filters change
   useEffect(() => {
@@ -300,7 +337,7 @@ export default function PaymentsAdminPage() {
               Đối Soát Giao Dịch & Cổng Thanh Toán
             </h3>
             <p style={{ fontSize: '0.8rem', color: 'var(--admin-text-muted)', marginTop: 2 }}>
-              Idempotency Key & Chuẩn Chữ Ký Số HMAC-SHA512 Webhook Verification
+              Giao dịch VNPay sandbox • Đối soát trạng thái bằng API querydr của VNPay
             </p>
           </div>
 
@@ -309,10 +346,10 @@ export default function PaymentsAdminPage() {
               className="btn-admin-secondary"
               onClick={handleSyncWebhook}
               disabled={syncing || loading}
-              title="Đồng bộ đối soát chữ ký số từ Webhook"
+              title="Tra cứu VNPay (querydr) cho các giao dịch đang chờ trong danh sách"
             >
               <RefreshCw size={14} className={syncing || loading ? 'spin' : ''} />
-              {syncing ? 'Đang đối soát...' : 'Kiểm Tra Lại Webhook'}
+              {syncing ? 'Đang đối soát...' : 'Đối Soát Giao Dịch Chờ'}
             </button>
           </div>
         </div>
@@ -337,7 +374,7 @@ export default function PaymentsAdminPage() {
               type="text"
               className="table-search-input"
               style={{ width: '100%', paddingLeft: 36, paddingRight: 32 }}
-              placeholder="Tìm theo Mã Đơn Vé, Idempotency Key, Khách hàng..."
+              placeholder="Tìm theo mã đơn vé, mã giao dịch, khách hàng..."
               value={keyword}
               onChange={e => setKeyword(e.target.value)}
             />
@@ -368,8 +405,6 @@ export default function PaymentsAdminPage() {
             >
               <option value="ALL">🌐 Tất cả cổng thanh toán</option>
               <option value="VNPAY">Cổng VNPAY (QR / ATM)</option>
-              <option value="MOMO">Ví MoMo</option>
-              <option value="ZALOPAY">ZaloPay</option>
             </select>
           </div>
 
@@ -389,6 +424,7 @@ export default function PaymentsAdminPage() {
               <option value="PENDING">Chờ thanh toán (PENDING)</option>
               <option value="FAILED">Thất bại (FAILED)</option>
               <option value="REFUNDED">Đã hoàn tiền (REFUNDED)</option>
+              <option value="REFUND_PENDING">Chờ hoàn tiền (REFUND_PENDING)</option>
             </select>
           </div>
 
@@ -432,7 +468,7 @@ export default function PaymentsAdminPage() {
               <tr>
                 <th>Mã Đơn Vé</th>
                 <th>Cổng Thanh Toán</th>
-                <th>Mã Giao Dịch (Idempotency Key)</th>
+                <th>Mã Giao Dịch (vnp_TxnRef)</th>
                 <th>Số Tiền</th>
                 <th>Thời Gian Giao Dịch</th>
                 <th>Trạng Thái Đối Soát</th>
@@ -482,16 +518,6 @@ export default function PaymentsAdminPage() {
                           <code style={{ color: 'var(--admin-primary-hover)', fontSize: '0.82rem' }}>
                             {p.transactionId}
                           </code>
-                          <span
-                            title="HMAC-SHA512 Chữ ký số hợp lệ"
-                            style={{
-                              display: 'inline-flex', alignItems: 'center', gap: 3,
-                              background: 'rgba(16, 185, 129, 0.15)', color: '#10b981',
-                              fontSize: '0.68rem', padding: '2px 6px', borderRadius: 4, fontWeight: 600
-                            }}
-                          >
-                            <ShieldCheck size={11} /> HMAC OK
-                          </span>
                         </div>
                       </td>
                       <td>
@@ -513,7 +539,7 @@ export default function PaymentsAdminPage() {
                         <button
                           className="btn-admin-secondary btn-admin-sm"
                           style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                          onClick={() => setSelectedPayment(p)}
+                          onClick={() => openDetail(p)}
                         >
                           <Eye size={13} /> Chi tiết
                         </button>
@@ -690,23 +716,70 @@ export default function PaymentsAdminPage() {
                 background: 'rgba(255,255,255,0.03)',
                 padding: '12px 14px', borderRadius: 8, border: '1px solid var(--admin-border)'
               }}>
-                <div style={{ fontSize: '0.78rem', color: 'var(--admin-text-muted)' }}>Idempotency Key (Mã Giao Dịch):</div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--admin-text-muted)' }}>Mã giao dịch (vnp_TxnRef):</div>
                 <code style={{ fontSize: '0.85rem', color: 'var(--admin-primary-hover)', wordBreak: 'break-all', marginTop: 2, display: 'block' }}>
                   {selectedPayment.transactionId}
                 </code>
               </div>
 
-              <div style={{
-                background: 'rgba(16, 185, 129, 0.08)',
-                border: '1px solid rgba(16, 185, 129, 0.3)',
-                padding: '12px 14px', borderRadius: 8
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#10b981', fontWeight: 600, fontSize: '0.85rem' }}>
-                  <ShieldCheck size={16} /> Chữ Ký Số HMAC-SHA512 Hợp Lệ
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, fontSize: '0.82rem' }}>
+                <div>
+                  <div style={{ color: 'var(--admin-text-muted)' }}>Trạng thái:</div>
+                  <div style={{ color: '#fff', fontWeight: 600 }}>{selectedPayment.status}</div>
                 </div>
-                <p style={{ margin: '4px 0 0 0', fontSize: '0.76rem', color: '#94a3b8' }}>
-                  Giao dịch đã được xác thực an toàn chống trùng lặp, chống tấn công replay và bảo vệ bởi thuật toán HMAC-SHA512.
-                </p>
+                <div>
+                  <div style={{ color: 'var(--admin-text-muted)' }}>Mã GD phía VNPay:</div>
+                  <div style={{ color: '#fff' }}>{selectedPayment.gatewayTransactionNo || '—'}</div>
+                </div>
+                <div>
+                  <div style={{ color: 'var(--admin-text-muted)' }}>Thanh toán lúc:</div>
+                  <div style={{ color: '#fff' }}>{selectedPayment.paidAt || '—'}</div>
+                </div>
+                <div>
+                  <div style={{ color: 'var(--admin-text-muted)' }}>Hoàn tiền:</div>
+                  <div style={{ color: '#fff' }}>
+                    {selectedPayment.refundAmount != null
+                      ? `${Number(selectedPayment.refundAmount).toLocaleString('vi-VN')} đ · ${selectedPayment.refundedAt || ''}`
+                      : '—'}
+                  </div>
+                </div>
+              </div>
+
+              {reconcileResult && (
+                <div style={{
+                  background: reconcileResult.matched ? 'rgba(16, 185, 129, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+                  border: `1px solid ${reconcileResult.matched ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.35)'}`,
+                  padding: '12px 14px', borderRadius: 8
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: reconcileResult.matched ? '#10b981' : '#f87171', fontWeight: 600, fontSize: '0.85rem' }}>
+                    {reconcileResult.matched ? <ShieldCheck size={16} /> : <AlertCircle size={16} />}
+                    {reconcileResult.message}
+                  </div>
+                  <p style={{ margin: '4px 0 0 0', fontSize: '0.76rem', color: '#94a3b8' }}>
+                    VNPay: mã phản hồi {reconcileResult.gatewayResponseCode || '—'}, trạng thái GD {reconcileResult.gatewayTransactionStatus || '—'}
+                    {reconcileResult.gatewayAmount != null && `, số tiền ${Number(reconcileResult.gatewayAmount).toLocaleString('vi-VN')} đ`}
+                  </p>
+                </div>
+              )}
+
+              <div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--admin-text-muted)', marginBottom: 6 }}>
+                  Lịch sử xử lý {detailLoading && '(đang tải...)'}
+                </div>
+                <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {(selectedPayment.logs || []).length === 0 && !detailLoading && (
+                    <div style={{ fontSize: '0.78rem', color: '#64748b' }}>Chưa có log.</div>
+                  )}
+                  {(selectedPayment.logs || []).map(log => (
+                    <div key={log.id} style={{
+                      fontSize: '0.76rem', padding: '6px 10px', borderRadius: 6,
+                      background: 'rgba(255,255,255,0.03)', border: '1px solid var(--admin-border)'
+                    }}>
+                      <div style={{ color: '#e2e8f0' }}>{log.description}</div>
+                      <div style={{ color: '#64748b' }}>{log.createdAt}{log.ipAddress ? ` · ${log.ipAddress}` : ''}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div style={{
@@ -724,6 +797,18 @@ export default function PaymentsAdminPage() {
               padding: '14px 20px', borderTop: '1px solid var(--admin-border)',
               background: 'rgba(255,255,255,0.02)'
             }}>
+              {selectedPayment.provider === 'VNPAY' && (
+                <button
+                  type="button"
+                  className="btn-admin-secondary"
+                  onClick={handleReconcileOne}
+                  disabled={reconciling}
+                  style={{ marginRight: 8 }}
+                >
+                  <RefreshCw size={14} className={reconciling ? 'spin' : ''} />
+                  {reconciling ? 'Đang đối soát...' : 'Đối soát với VNPay'}
+                </button>
+              )}
               <button
                 type="button"
                 className="btn-admin-primary"

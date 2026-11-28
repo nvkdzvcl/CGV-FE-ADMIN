@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import {
   DollarSign, Ticket, Calendar, Users, TrendingUp,
-  Flame, RefreshCw, CheckCircle, RotateCcw, AlertOctagon, CheckSquare
+  Flame, RefreshCw, CheckCircle, RotateCcw, AlertOctagon, CheckSquare, Download
 } from 'lucide-react';
-import { AdminApi } from '../services/adminApi';
+import { AdminApi, bookingStatusInfo } from '../services/adminApi';
+import { exportDashboardReport } from '../services/exportExcel';
 
 export default function DashboardPage() {
   const [stats, setStats] = useState(null);
@@ -43,8 +44,21 @@ export default function DashboardPage() {
 
   const breakdown = stats.statusBreakdown || {};
 
+  const handleExportReport = async () => {
+    try {
+      await exportDashboardReport(stats);
+    } catch (err) {
+      alert('Không thể xuất báo cáo: ' + (err.message || 'Lỗi không xác định'));
+    }
+  };
+
   return (
     <div className="dashboard-page">
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <button className="btn-admin-secondary" onClick={handleExportReport} title="Xuất báo cáo thống kê ra Excel">
+          <Download size={14} /> Xuất báo cáo Excel
+        </button>
+      </div>
       {/* KPI Cards Grid */}
       <div className="dashboard-kpi-grid">
         <div className="kpi-card">
@@ -79,8 +93,8 @@ export default function DashboardPage() {
 
         <div className="kpi-card">
           <div>
-            <div className="kpi-label">Suất chiếu đang chạy</div>
-            <div className="kpi-value">{stats.activeShowtimes}</div>
+            <div className="kpi-label">Suất chiếu hôm nay</div>
+            <div className="kpi-value">{stats.activeShowtimes ?? 0}</div>
             <div className="kpi-growth" style={{ color: '#94a3b8' }}>
               Trên toàn cụm rạp CGV
             </div>
@@ -92,10 +106,12 @@ export default function DashboardPage() {
 
         <div className="kpi-card">
           <div>
-            <div className="kpi-label">Tỷ lệ lấp đầy ghế</div>
-            <div className="kpi-value">{stats.occupancyRate || '78.5%'}</div>
-            <div className="kpi-growth">
-              <TrendingUp size={14} /> {stats.growthOccupancy || '+5.2%'} hiệu suất rạp
+            <div className="kpi-label">Tỷ lệ lấp đầy ghế hôm nay</div>
+            <div className="kpi-value">{stats.occupancyRate || '—'}</div>
+            <div className="kpi-growth" style={{ color: '#94a3b8' }}>
+              {stats.occupancySeats
+                ? `${stats.occupancySeats.sold.toLocaleString('vi-VN')} / ${stats.occupancySeats.total.toLocaleString('vi-VN')} ghế đã bán`
+                : 'Chưa có suất chiếu hôm nay'}
             </div>
           </div>
           <div className="kpi-icon-box" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24' }}>
@@ -260,17 +276,18 @@ export default function DashboardPage() {
                       </code>
                     </td>
                     <td>
-                      <strong style={{ color: '#fff' }}>{b.userName || 'Khách vãng lai'}</strong>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--admin-primary-hover)' }}>{b.userPhone || '—'}</div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--admin-text-muted)' }}>{b.userEmail}</div>
+                      <strong style={{ color: '#fff' }}>{b.userName || b.userEmail || 'Thành viên'}</strong>
+                      {b.userPhone && <div style={{ fontSize: '0.75rem', color: 'var(--admin-primary-hover)' }}>{b.userPhone}</div>}
+                      {b.userName && b.userEmail && <div style={{ fontSize: '0.72rem', color: 'var(--admin-text-muted)' }}>{b.userEmail}</div>}
+                      {!b.userEmail && b.userId && <div style={{ fontSize: '0.72rem', color: 'var(--admin-text-muted)' }}>ID: {b.userId}</div>}
                     </td>
                     <td><strong style={{ color: '#fff' }}>{b.movieTitle}</strong></td>
                     <td>{b.cinemaName} • {b.roomName}</td>
                     <td><span className="badge-tag">{Array.isArray(b.seats) ? b.seats.join(', ') : b.seats}</span></td>
                     <td>{Number(b.totalAmount || 0).toLocaleString('vi-VN')}đ</td>
                     <td>
-                      <span className={`status-pill ${b.rawStatus === 'CONFIRMED' || b.status === 'PAID' ? 'success' : (b.rawStatus === 'REFUNDED' ? 'danger' : 'warning')}`}>
-                        {b.rawStatus === 'CONFIRMED' || b.status === 'PAID' ? 'Đã thanh toán' : (b.rawStatus === 'REFUNDED' ? 'Đã hoàn vé' : b.status)}
+                      <span className={`status-pill ${bookingStatusInfo(b.rawStatus).tone}`}>
+                        {bookingStatusInfo(b.rawStatus).label}
                       </span>
                     </td>
                   </tr>

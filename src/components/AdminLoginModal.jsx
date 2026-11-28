@@ -73,7 +73,7 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
                 required
                 className="table-search-input"
                 style={{ width: '100%', paddingLeft: 38, background: '#090d16', border: '1px solid var(--admin-border)' }}
-                placeholder="admin@cgv.vn"
+                placeholder="Email tài khoản quản trị"
                 value={username}
                 onChange={e => setUsername(e.target.value)}
               />

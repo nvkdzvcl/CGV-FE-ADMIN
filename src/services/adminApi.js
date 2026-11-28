@@ -1,7 +1,7 @@
 import {
   DASHBOARD_STATS, INITIAL_MOVIES, INITIAL_CINEMAS,
   INITIAL_SHOWTIMES, INITIAL_BOOKINGS,
-  INITIAL_PROMOTIONS, INITIAL_PAYMENTS
+  INITIAL_PROMOTIONS
 } from '../data/adminMockData';
 import { realtime, REALTIME_EVENTS } from './realtimeService';
 
@@ -173,6 +173,78 @@ async function adminFetch(path, options = {}, fallbackData = null) {
   }
 }
 
+// Nhãn tiếng Việt cho trạng thái đơn của booking-service
+export const BOOKING_STATUS_INFO = {
+  SEAT_RESERVED: { label: 'Đang giữ ghế', tone: 'warning' },
+  PAYMENT_PENDING: { label: 'Chờ thanh toán', tone: 'warning' },
+  CONFIRMED: { label: 'Đã thanh toán', tone: 'success' },
+  USED: { label: 'Đã soát vé', tone: 'info' },
+  CANCELLED: { label: 'Đã hủy', tone: 'danger' },
+  CANCELLED_DUE_TO_MAINTENANCE: { label: 'Hủy do bảo trì', tone: 'danger' },
+  REFUNDED: { label: 'Đã hoàn tiền', tone: 'danger' },
+};
+
+export function bookingStatusInfo(status) {
+  return BOOKING_STATUS_INFO[status] || { label: status || '—', tone: 'warning' };
+}
+
+/** Ngày hôm nay theo giờ Việt Nam (yyyy-mm-dd), không dùng toISOString (UTC). */
+export function vietnamToday() {
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date());
+}
+
+/** Số suất chiếu hôm nay và tỷ lệ lấp đầy = ghế đã bán / tổng ghế của các suất hôm nay. */
+function todayShowtimeStats(showtimesRes, showtimesList) {
+  const total = showtimesRes.status === 'fulfilled' ? Number(showtimesRes.value?.totalElements ?? showtimesList.length) : 0;
+  let seats = 0;
+  let free = 0;
+  (Array.isArray(showtimesList) ? showtimesList : []).forEach(st => {
+    if (st.status === 'CANCELLED') return;
+    const capacity = Number(st.roomResponse?.totalSeats || 0);
+    if (capacity <= 0) return;
+    seats += capacity;
+    free += Math.min(Number(st.availableSeats ?? capacity), capacity);
+  });
+  return {
+    activeShowtimes: total,
+    occupancyRate: seats > 0 ? `${(((seats - free) / seats) * 100).toFixed(1)}%` : '—',
+    occupancySeats: { sold: seats - free, total: seats }
+  };
+}
+
+export function formatVnDateTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  // "yyyy-mm-dd HH:mm" theo giờ VN để bộ lọc ngày (yyyy-mm-dd) so khớp được
+  const parts = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false
+  }).format(d);
+  return parts.replace('T', ' ');
+}
+
+function mapPayment(p) {
+  if (!p) return p;
+  return {
+    id: p.id,
+    bookingId: p.bookingId,
+    userId: p.userId,
+    customerName: p.userId,
+    provider: p.provider || 'VNPAY',
+    paymentMethod: p.paymentMethod,
+    transactionId: p.transactionId,
+    gatewayTransactionNo: p.gatewayTransactionNo,
+    amount: Number(p.amount || 0),
+    status: p.status,
+    createdAt: formatVnDateTime(p.createdAt),
+    paidAt: formatVnDateTime(p.paidAt),
+    refundAmount: p.refundAmount != null ? Number(p.refundAmount) : null,
+    refundedAt: formatVnDateTime(p.refundedAt),
+    logs: Array.isArray(p.logs) ? p.logs.map(l => ({ ...l, createdAt: formatVnDateTime(l.createdAt) })) : undefined,
+  };
+}
+
 export const AdminApi = {
   // ─── AUTHENTICATION ───
   login: async (username, password) => {
@@ -254,10 +326,11 @@ export const AdminApi = {
   // ─── DASHBOARD STATS ───
   getDashboardStats: async () => {
     try {
+      const todayVn = vietnamToday();
       const [statsRes, moviesRes, showtimesRes] = await Promise.allSettled([
         adminFetch('/api/v1/bookings/admin/statistics', {}, null),
         adminFetch('/api/v1/catalogs/movies?page=0&size=50', {}, []),
-        adminFetch('/api/v1/catalogs/showtimes?page=0&size=50', {}, [])
+        adminFetch(`/api/v1/catalogs/showtimes?page=0&size=500&showDate=${todayVn}`, {}, [])
       ]);
 
       const realStats = statsRes.status === 'fulfilled' && statsRes.value ? statsRes.value : null;
@@ -276,17 +349,15 @@ export const AdminApi = {
           weeklyRevenue: realStats.weeklyRevenue && realStats.weeklyRevenue.length > 0
             ? realStats.weeklyRevenue.map(w => ({
                 day: w.day,
+                date: w.date,
+                count: Number(w.count || 0),
                 amount: Number(w.amount || 0) * 1000000,
                 label: `${Number(w.amount || 0)}M`
               }))
             : DASHBOARD_STATS.weeklyRevenue,
           topMovies: realStats.topMovies || [],
-          activeShowtimes: showtimesList.length || 18,
-          activeMovies: moviesList.length || 8,
-          occupancyRate: '78.5%',
-          growthRevenue: '+18.4%',
-          growthTickets: '+12.6%',
-          growthOccupancy: '+5.2%'
+          ...todayShowtimeStats(showtimesRes, showtimesList),
+          activeMovies: moviesList.length
         };
       }
 
@@ -388,7 +459,7 @@ export const AdminApi = {
       title: m.title,
       originalTitle: m.subTitle || m.originalTitle || m.title,
       duration: m.durationMinutes || m.duration || 120,
-      ageRating: m.ageRating || 'P',
+      ageRating: m.ageRating || '',
       genre: Array.isArray(m.genres) ? m.genres.map(g => g.name || g).join(', ') : (m.genre || 'Hành Động'),
       genres: m.genres || [],
       releaseDate: m.releaseDate ? String(m.releaseDate).substring(0, 10) : '2026-09-01',
@@ -400,6 +471,7 @@ export const AdminApi = {
       synopsis: m.synopsis || '',
       director: m.director || '',
       language: m.language || 'Tiếng Việt',
+      country: m.country || '',
       isFeatured: m.isFeatured || false,
       revenue: m.revenue || 450000000
     }));
@@ -420,6 +492,7 @@ export const AdminApi = {
       trailerYoutubeUrl: movieData.trailerYoutubeUrl?.trim() || null,
       synopsis: movieData.synopsis?.trim() || null,
       language: movieData.language || 'Tiếng Việt',
+      country: movieData.country?.trim() || null,
       subtitle: movieData.subtitle?.trim() || null,
       supportedModes: Array.isArray(movieData.supportedModes) ? movieData.supportedModes.join(',') : (movieData.supportedModes || '2D'),
       isFeatured: Boolean(movieData.isFeatured),
@@ -478,6 +551,7 @@ export const AdminApi = {
       trailerYoutubeUrl: movieData.trailerYoutubeUrl?.trim() || null,
       synopsis: movieData.synopsis?.trim() || null,
       language: movieData.language || 'Tiếng Việt',
+      country: movieData.country?.trim() || null,
       subtitle: movieData.subtitle?.trim() || null,
       supportedModes: Array.isArray(movieData.supportedModes) ? movieData.supportedModes.join(',') : (movieData.supportedModes || '2D'),
       isFeatured: Boolean(movieData.isFeatured)
@@ -853,19 +927,12 @@ export const AdminApi = {
   },
 
   deleteSeat: async (seatId) => {
-    // Backend uses status isActive: false to disable seat
-    try {
-      return await adminFetch(`/api/v1/catalogs/seats/${seatId}/status`, {
-        method: 'PATCH',
-        body: JSON.stringify({ isActive: false })
-      });
-    } catch {
-      return { success: true };
-    }
+    return await adminFetch(`/api/v1/catalogs/seats/${seatId}`, { method: 'DELETE' });
   },
 
   // ─── ROLES ───
   getRoles: () => adminFetch('/api/v1/roles'),
+  getRoleComposites: (roleName) => adminFetch(`/api/v1/roles/${encodeURIComponent(roleName)}/composites`),
   createRole: (role) => adminFetch('/api/v1/roles', { method: 'POST', body: JSON.stringify(role) }),
   updateRole: (roleName, description) => adminFetch(`/api/v1/roles/${encodeURIComponent(roleName)}`, {
     method: 'PUT', body: JSON.stringify({ name: roleName, description })
@@ -919,9 +986,12 @@ export const AdminApi = {
   },
 
   // ─── BOOKINGS & BOX OFFICE QR CHECK-IN ───
-  searchBookings: async (keyword = '', page = 0, size = 20) => {
+  searchBookings: async (keyword = '', page = 0, size = 20, filters = {}) => {
     const params = new URLSearchParams();
     if (keyword) params.append('keyword', keyword.trim());
+    if (filters.status) params.append('status', filters.status);
+    if (filters.fromDate) params.append('fromDate', filters.fromDate);
+    if (filters.toDate) params.append('toDate', filters.toDate);
     params.append('page', page.toString());
     params.append('size', size.toString());
 
@@ -931,17 +1001,20 @@ export const AdminApi = {
     });
 
     const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : INITIAL_BOOKINGS);
+    // Không dùng giá trị giả: trường nào backend không có thì để trống
     return list.map(b => ({
       id: b.bookingId || b.id,
-      userEmail: b.guestEmail || b.userId || 'guest@cgv.vn',
-      userName: b.guestName || b.userName || 'Khách hàng',
-      userPhone: b.guestPhone || b.phone || '0912345678',
-      movieTitle: b.movieTitle || 'Phim điện ảnh CGV',
-      cinemaName: b.cinemaName || 'CGV Vincom',
-      roomName: b.roomName || 'Cinema 1',
-      showtimeStart: b.showtimeStart || b.createdAt,
-      seats: b.seatLabels || b.seats || ['A1'],
-      totalAmount: Number(b.finalAmount || b.totalAmount || 110000),
+      userId: b.userId || '',
+      userEmail: b.guestEmail || '',
+      userName: b.guestName || '',
+      userPhone: b.guestPhone || '',
+      movieTitle: b.movieTitle || '',
+      cinemaName: b.cinemaName || '',
+      roomName: b.roomName || '',
+      showtimeStart: b.showtimeStart || null,
+      createdAt: b.createdAt,
+      seats: b.seatLabels || b.seats || [],
+      totalAmount: Number(b.finalAmount ?? b.totalAmount ?? 0),
       status: b.status === 'CONFIRMED' ? 'PAID' : b.status,
       checkinStatus: b.status === 'USED' ? 'CHECKED_IN' : (b.status === 'REFUNDED' ? 'REFUNDED' : 'PENDING'),
       rawStatus: b.status
@@ -1171,42 +1244,47 @@ export const AdminApi = {
   },
 
   getUserBookings: async (userId, page = 0, size = 20) => {
-    const res = await adminFetch(`/api/v1/bookings/admin/search?userId=${userId}&page=${page}&size=${size}`, {}, []);
+    // API tìm đơn không có tham số userId; từ khóa khớp cả cột user_id
+    const res = await adminFetch(`/api/v1/bookings/admin/search?keyword=${encodeURIComponent(userId)}&page=${page}&size=${size}`, {}, []);
     const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
     return list.map(b => ({
       id: b.bookingId || b.id,
-      movieTitle: b.movieTitle || 'Phim CGV',
-      showtimeStart: b.showtimeStart || b.createdAt,
-      seats: b.seatLabels || b.seats || ['A1'],
+      movieTitle: b.movieTitle || '',
+      showtimeStart: b.showtimeStart || null,
+      seats: b.seatLabels || b.seats || [],
       totalAmount: Number(b.finalAmount || b.totalAmount || 0),
       status: b.status
     }));
   },
 
-  getPayments: async () => {
-    try {
-      const bookingsRes = await adminFetch('/api/v1/bookings/admin/search?size=200', {}, []);
-      const bookings = Array.isArray(bookingsRes) ? bookingsRes : (bookingsRes?.data || []);
-      if (bookings.length > 0) {
-        const mappedFromBookings = bookings.map(b => ({
-          id: `pay-${b.bookingId || b.id}`,
-          bookingId: b.bookingId || b.id,
-          provider: b.paymentMethod || (String(b.bookingId || '').includes('VN') ? 'VNPAY' : 'MOMO'),
-          transactionId: b.transactionId || `TXN-${(b.bookingId || b.id).toString().replace(/-/g, '').slice(0, 12).toUpperCase()}`,
-          amount: Number(b.finalAmount || b.totalAmount || 0),
-          status: b.paymentStatus || (b.status === 'PAID' || b.status === 'CONFIRMED' || b.status === 'USED' ? 'SUCCESS' : (b.status === 'REFUNDED' ? 'REFUNDED' : 'PENDING')),
-          createdAt: b.createdAt ? new Date(b.createdAt).toLocaleString('vi-VN') : '2026-09-15 14:00',
-          movieTitle: b.movieTitle,
-          customerName: b.customerName || b.userEmail
-        }));
-        const existingBookingIds = new Set(mappedFromBookings.map(p => p.bookingId));
-        const filteredInitial = INITIAL_PAYMENTS.filter(p => !existingBookingIds.has(p.bookingId));
-        return [...mappedFromBookings, ...filteredInitial];
-      }
-    } catch (e) {
-      console.warn('Fallback to INITIAL_PAYMENTS:', e.message);
-    }
-    return INITIAL_PAYMENTS;
+  // ─── PAYMENTS (payment-service /payments/admin) ───
+  getPayments: async (filters = {}) => {
+    const params = new URLSearchParams();
+    params.append('page', '0');
+    params.append('size', String(filters.size || 200));
+    if (filters.keyword) params.append('keyword', filters.keyword.trim());
+    if (filters.status) params.append('status', filters.status);
+    if (filters.provider) params.append('provider', filters.provider);
+    if (filters.fromDate) params.append('fromDate', filters.fromDate);
+    if (filters.toDate) params.append('toDate', filters.toDate);
+    const res = await adminFetch(`/api/v1/payments/admin?${params.toString()}`);
+    const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
+    return list.map(mapPayment);
+  },
+
+  getPaymentDetail: async (paymentId) => {
+    const res = await adminFetch(`/api/v1/payments/admin/${paymentId}`);
+    return mapPayment(res);
+  },
+
+  reconcilePayment: async (paymentId) => {
+    return await adminFetch(`/api/v1/payments/admin/${paymentId}/reconcile`, { method: 'POST' });
+  },
+
+  /** Hoàn tiền VNPay cho đơn; trả về null nếu đơn không có giao dịch trực tuyến. */
+  refundPaymentForBooking: async (bookingId) => {
+    const cleanId = AdminApi.extractUuid(bookingId);
+    return await adminFetch(`/api/v1/payments/admin/refund/booking/${cleanId}`, { method: 'POST' });
   },
 
   // Batch Job Simulator (1M Vouchers)

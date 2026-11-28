@@ -8,7 +8,7 @@ export default function PromotionModal({ onClose, onSave }) {
   const [discountType, setDiscountType] = useState('FIXED');
   const [discountValue, setDiscountValue] = useState(50000);
   const [minOrderValue, setMinOrderValue] = useState(150000);
-  const [applicableTier, setApplicableTier] = useState('MEMBER');
+  const [applicableTier, setApplicableTier] = useState('ALL');
   const [usageLimit, setUsageLimit] = useState(1000);
   const [validFrom, setValidFrom] = useState('2026-09-24');
   const [validTo, setValidTo] = useState('2026-12-31');
@@ -124,9 +124,11 @@ export default function PromotionModal({ onClose, onSave }) {
               <div className="form-field">
                 <label>Áp dụng cho Hạng Thành Viên</label>
                 <select value={applicableTier} onChange={e => setApplicableTier(e.target.value)}>
-                  <option value="MEMBER">Tất cả hội viên (MEMBER+)</option>
-                  <option value="VIP">Chỉ VIP & VVIP</option>
-                  <option value="VVIP">Chỉ độc quyền VVIP (Bạch Kim)</option>
+                  <option value="ALL">Tất cả khách hàng</option>
+                  <option value="MEMBER">Từ hạng Thành viên (MEMBER) trở lên</option>
+                  <option value="SILVER">Từ hạng Bạc (SILVER) trở lên</option>
+                  <option value="GOLD">Từ hạng Vàng (GOLD) trở lên</option>
+                  <option value="PLATINUM">Chỉ hạng Bạch Kim (PLATINUM)</option>
                 </select>
               </div>
             </div>
