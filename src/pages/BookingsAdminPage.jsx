@@ -5,7 +5,7 @@ import {
   Filter, Calendar, Phone, Mail, User
 } from 'lucide-react';
 import QrScannerModal from '../components/QrScannerModal';
-import { AdminApi } from '../services/adminApi';
+import { AdminApi, bookingStatusInfo, formatVnDateTime } from '../services/adminApi';
 import { realtime, REALTIME_EVENTS } from '../services/realtimeService';
 import { exportBookingsToExcel } from '../services/exportExcel';
 
@@ -371,15 +371,22 @@ export default function BookingsAdminPage() {
                       </code>
                     </td>
                     <td>
-                      <div style={{ fontWeight: 600, color: '#fff' }}>{b.userName || 'Khách vãng lai'}</div>
-                      <div style={{ fontSize: '0.78rem', color: 'var(--admin-primary-hover)' }}>{b.userPhone || '—'}</div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-muted)' }}>{b.userEmail}</div>
+                      <div style={{ fontWeight: 600, color: '#fff' }}>{b.userName || b.userEmail || 'Thành viên'}</div>
+                      {b.userPhone && (
+                        <div style={{ fontSize: '0.78rem', color: 'var(--admin-primary-hover)' }}>{b.userPhone}</div>
+                      )}
+                      {b.userName && b.userEmail && (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-muted)' }}>{b.userEmail}</div>
+                      )}
+                      {!b.userEmail && b.userId && (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-muted)' }}>ID: {b.userId}</div>
+                      )}
                     </td>
                     <td>
                       <strong style={{ color: '#fff' }}>{b.movieTitle}</strong>
                       {b.showtimeStart && (
                         <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-muted)' }}>
-                          Suất: {String(b.showtimeStart).substring(0, 16).replace('T', ' ')}
+                          Suất: {formatVnDateTime(b.showtimeStart)}
                         </div>
                       )}
                     </td>
@@ -387,18 +394,20 @@ export default function BookingsAdminPage() {
                     <td><span className="badge-tag">{Array.isArray(b.seats) ? b.seats.join(', ') : b.seats}</span></td>
                     <td><strong>{Number(b.totalAmount || 0).toLocaleString('vi-VN')}đ</strong></td>
                     <td>
-                      <span className={`status-pill ${b.rawStatus === 'PAID' || b.rawStatus === 'CONFIRMED' || b.status === 'PAID' ? 'success' : (b.rawStatus === 'REFUNDED' ? 'danger' : 'warning')}`}>
-                        {b.rawStatus === 'CONFIRMED' || b.status === 'PAID' ? 'ĐÃ THANH TOÁN' : (b.rawStatus === 'REFUNDED' ? 'ĐÃ HOÀN TIỀN' : (b.rawStatus || b.status))}
+                      <span className={`status-pill ${bookingStatusInfo(b.rawStatus).tone}`}>
+                        {bookingStatusInfo(b.rawStatus).label.toUpperCase()}
                       </span>
                     </td>
                     <td>
                       <span className={`status-pill ${b.checkinStatus === 'CHECKED_IN' || b.rawStatus === 'USED' ? 'success' : (b.rawStatus === 'REFUNDED' ? 'danger' : 'warning')}`}>
-                        {b.checkinStatus === 'CHECKED_IN' || b.rawStatus === 'USED' ? 'ĐÃ VÀO RẠP' : (b.rawStatus === 'REFUNDED' ? 'ĐÃ HỦY' : 'CHƯA QUÉT')}
+                        {b.checkinStatus === 'CHECKED_IN' || b.rawStatus === 'USED'
+                          ? 'ĐÃ VÀO RẠP'
+                          : (b.rawStatus === 'CONFIRMED' ? 'CHƯA QUÉT' : '—')}
                       </span>
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                        {b.rawStatus !== 'REFUNDED' && b.checkinStatus !== 'CHECKED_IN' && b.rawStatus !== 'USED' && (
+                        {b.rawStatus === 'CONFIRMED' && (
                           <button
                             className="btn-admin-primary btn-admin-sm"
                             style={{ background: '#10b981', padding: '4px 8px', fontSize: '0.78rem' }}
@@ -409,7 +418,7 @@ export default function BookingsAdminPage() {
                             <Check size={13} /> Vào
                           </button>
                         )}
-                        {b.rawStatus !== 'REFUNDED' && (
+                        {b.rawStatus === 'CONFIRMED' && (
                           <button
                             className="btn-admin-secondary btn-admin-sm"
                             style={{ color: '#ef4444', borderColor: '#ef4444', padding: '4px 8px', fontSize: '0.78rem' }}
@@ -577,7 +586,7 @@ export default function BookingsAdminPage() {
                   {selectedBooking.cinemaName} — {selectedBooking.roomName}
                 </div>
                 <div style={{ fontSize: '0.82rem', color: '#cbd5e1', marginTop: 4 }}>
-                  Suất chiếu: <strong>{selectedBooking.showtimeStart ? String(selectedBooking.showtimeStart).substring(0, 16).replace('T', ' ') : 'N/A'}</strong>
+                  Suất chiếu: <strong>{selectedBooking.showtimeStart ? formatVnDateTime(selectedBooking.showtimeStart) : 'N/A'}</strong>
                 </div>
               </div>
 

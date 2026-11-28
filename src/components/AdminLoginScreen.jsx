@@ -99,7 +99,7 @@ export default function AdminLoginScreen({ onLoginSuccess }) {
                 required
                 className="table-search-input"
                 style={{ width: '100%', paddingLeft: 40, height: 42 }}
-                placeholder="admin@cgv.vn"
+                placeholder="Email tài khoản quản trị"
                 value={username}
                 onChange={e => setUsername(e.target.value)}
               />

@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import ShowtimeModal from '../components/ShowtimeModal';
 import ExcelImportShowtimeModal from '../components/ExcelImportShowtimeModal';
-import { AdminApi } from '../services/adminApi';
+import { AdminApi, vietnamToday } from '../services/adminApi';
 import { exportShowtimesToExcel } from '../services/exportExcel';
 import { realtime, REALTIME_EVENTS } from '../services/realtimeService';
 
@@ -176,8 +176,7 @@ export default function ShowtimesAdminPage() {
   };
 
   const handleQuickDateToday = () => {
-    const today = new Date().toISOString().split('T')[0];
-    setSelectedDate(today);
+    setSelectedDate(vietnamToday()); // ngày theo giờ VN, không theo UTC
   };
 
   const handleResetFilters = () => {
@@ -365,7 +364,7 @@ export default function ShowtimesAdminPage() {
                 <option value="ALL">🚪 Tất cả phòng chiếu</option>
                 {availableRooms.map(r => (
                   <option key={r.id} value={r.id}>
-                    {r.name} ({r.format || '2D'}) {r.status === 'MAINTENANCE' ? '[Bảo trì]' : ''}
+                    {r.name}{r.cinemaName ? ` — ${r.cinemaName}` : ''} ({r.format || '2D'}) {r.status === 'MAINTENANCE' ? '[Bảo trì]' : ''}
                   </option>
                 ))}
               </select>

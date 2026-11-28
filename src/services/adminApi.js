@@ -173,7 +173,46 @@ async function adminFetch(path, options = {}, fallbackData = null) {
   }
 }
 
-function formatVnDateTime(iso) {
+// Nhãn tiếng Việt cho trạng thái đơn của booking-service
+export const BOOKING_STATUS_INFO = {
+  SEAT_RESERVED: { label: 'Đang giữ ghế', tone: 'warning' },
+  PAYMENT_PENDING: { label: 'Chờ thanh toán', tone: 'warning' },
+  CONFIRMED: { label: 'Đã thanh toán', tone: 'success' },
+  USED: { label: 'Đã soát vé', tone: 'info' },
+  CANCELLED: { label: 'Đã hủy', tone: 'danger' },
+  CANCELLED_DUE_TO_MAINTENANCE: { label: 'Hủy do bảo trì', tone: 'danger' },
+  REFUNDED: { label: 'Đã hoàn tiền', tone: 'danger' },
+};
+
+export function bookingStatusInfo(status) {
+  return BOOKING_STATUS_INFO[status] || { label: status || '—', tone: 'warning' };
+}
+
+/** Ngày hôm nay theo giờ Việt Nam (yyyy-mm-dd), không dùng toISOString (UTC). */
+export function vietnamToday() {
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date());
+}
+
+/** Số suất chiếu hôm nay và tỷ lệ lấp đầy = ghế đã bán / tổng ghế của các suất hôm nay. */
+function todayShowtimeStats(showtimesRes, showtimesList) {
+  const total = showtimesRes.status === 'fulfilled' ? Number(showtimesRes.value?.totalElements ?? showtimesList.length) : 0;
+  let seats = 0;
+  let free = 0;
+  (Array.isArray(showtimesList) ? showtimesList : []).forEach(st => {
+    if (st.status === 'CANCELLED') return;
+    const capacity = Number(st.roomResponse?.totalSeats || 0);
+    if (capacity <= 0) return;
+    seats += capacity;
+    free += Math.min(Number(st.availableSeats ?? capacity), capacity);
+  });
+  return {
+    activeShowtimes: total,
+    occupancyRate: seats > 0 ? `${(((seats - free) / seats) * 100).toFixed(1)}%` : '—',
+    occupancySeats: { sold: seats - free, total: seats }
+  };
+}
+
+export function formatVnDateTime(iso) {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return String(iso);
@@ -287,10 +326,11 @@ export const AdminApi = {
   // ─── DASHBOARD STATS ───
   getDashboardStats: async () => {
     try {
+      const todayVn = vietnamToday();
       const [statsRes, moviesRes, showtimesRes] = await Promise.allSettled([
         adminFetch('/api/v1/bookings/admin/statistics', {}, null),
         adminFetch('/api/v1/catalogs/movies?page=0&size=50', {}, []),
-        adminFetch('/api/v1/catalogs/showtimes?page=0&size=50', {}, [])
+        adminFetch(`/api/v1/catalogs/showtimes?page=0&size=500&showDate=${todayVn}`, {}, [])
       ]);
 
       const realStats = statsRes.status === 'fulfilled' && statsRes.value ? statsRes.value : null;
@@ -316,12 +356,8 @@ export const AdminApi = {
               }))
             : DASHBOARD_STATS.weeklyRevenue,
           topMovies: realStats.topMovies || [],
-          activeShowtimes: showtimesList.length || 18,
-          activeMovies: moviesList.length || 8,
-          occupancyRate: '78.5%',
-          growthRevenue: '+18.4%',
-          growthTickets: '+12.6%',
-          growthOccupancy: '+5.2%'
+          ...todayShowtimeStats(showtimesRes, showtimesList),
+          activeMovies: moviesList.length
         };
       }
 
@@ -423,7 +459,7 @@ export const AdminApi = {
       title: m.title,
       originalTitle: m.subTitle || m.originalTitle || m.title,
       duration: m.durationMinutes || m.duration || 120,
-      ageRating: m.ageRating || 'P',
+      ageRating: m.ageRating || '',
       genre: Array.isArray(m.genres) ? m.genres.map(g => g.name || g).join(', ') : (m.genre || 'Hành Động'),
       genres: m.genres || [],
       releaseDate: m.releaseDate ? String(m.releaseDate).substring(0, 10) : '2026-09-01',
@@ -896,6 +932,7 @@ export const AdminApi = {
 
   // ─── ROLES ───
   getRoles: () => adminFetch('/api/v1/roles'),
+  getRoleComposites: (roleName) => adminFetch(`/api/v1/roles/${encodeURIComponent(roleName)}/composites`),
   createRole: (role) => adminFetch('/api/v1/roles', { method: 'POST', body: JSON.stringify(role) }),
   updateRole: (roleName, description) => adminFetch(`/api/v1/roles/${encodeURIComponent(roleName)}`, {
     method: 'PUT', body: JSON.stringify({ name: roleName, description })
@@ -964,18 +1001,20 @@ export const AdminApi = {
     });
 
     const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : INITIAL_BOOKINGS);
+    // Không dùng giá trị giả: trường nào backend không có thì để trống
     return list.map(b => ({
       id: b.bookingId || b.id,
-      userEmail: b.guestEmail || b.userId || 'guest@cgv.vn',
-      userName: b.guestName || b.userName || 'Khách hàng',
-      userPhone: b.guestPhone || b.phone || '0912345678',
-      movieTitle: b.movieTitle || 'Phim điện ảnh CGV',
-      cinemaName: b.cinemaName || 'CGV Vincom',
-      roomName: b.roomName || 'Cinema 1',
-      showtimeStart: b.showtimeStart || b.createdAt,
+      userId: b.userId || '',
+      userEmail: b.guestEmail || '',
+      userName: b.guestName || '',
+      userPhone: b.guestPhone || '',
+      movieTitle: b.movieTitle || '',
+      cinemaName: b.cinemaName || '',
+      roomName: b.roomName || '',
+      showtimeStart: b.showtimeStart || null,
       createdAt: b.createdAt,
-      seats: b.seatLabels || b.seats || ['A1'],
-      totalAmount: Number(b.finalAmount || b.totalAmount || 110000),
+      seats: b.seatLabels || b.seats || [],
+      totalAmount: Number(b.finalAmount ?? b.totalAmount ?? 0),
       status: b.status === 'CONFIRMED' ? 'PAID' : b.status,
       checkinStatus: b.status === 'USED' ? 'CHECKED_IN' : (b.status === 'REFUNDED' ? 'REFUNDED' : 'PENDING'),
       rawStatus: b.status
@@ -1205,13 +1244,14 @@ export const AdminApi = {
   },
 
   getUserBookings: async (userId, page = 0, size = 20) => {
-    const res = await adminFetch(`/api/v1/bookings/admin/search?userId=${userId}&page=${page}&size=${size}`, {}, []);
+    // API tìm đơn không có tham số userId; từ khóa khớp cả cột user_id
+    const res = await adminFetch(`/api/v1/bookings/admin/search?keyword=${encodeURIComponent(userId)}&page=${page}&size=${size}`, {}, []);
     const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
     return list.map(b => ({
       id: b.bookingId || b.id,
-      movieTitle: b.movieTitle || 'Phim CGV',
-      showtimeStart: b.showtimeStart || b.createdAt,
-      seats: b.seatLabels || b.seats || ['A1'],
+      movieTitle: b.movieTitle || '',
+      showtimeStart: b.showtimeStart || null,
+      seats: b.seatLabels || b.seats || [],
       totalAmount: Number(b.finalAmount || b.totalAmount || 0),
       status: b.status
     }));

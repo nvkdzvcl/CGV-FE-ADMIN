@@ -337,7 +337,7 @@ export default function PaymentsAdminPage() {
               Đối Soát Giao Dịch & Cổng Thanh Toán
             </h3>
             <p style={{ fontSize: '0.8rem', color: 'var(--admin-text-muted)', marginTop: 2 }}>
-              Idempotency Key & Chuẩn Chữ Ký Số HMAC-SHA512 Webhook Verification
+              Giao dịch VNPay sandbox • Đối soát trạng thái bằng API querydr của VNPay
             </p>
           </div>
 
@@ -374,7 +374,7 @@ export default function PaymentsAdminPage() {
               type="text"
               className="table-search-input"
               style={{ width: '100%', paddingLeft: 36, paddingRight: 32 }}
-              placeholder="Tìm theo Mã Đơn Vé, Idempotency Key, Khách hàng..."
+              placeholder="Tìm theo mã đơn vé, mã giao dịch, khách hàng..."
               value={keyword}
               onChange={e => setKeyword(e.target.value)}
             />
@@ -405,8 +405,6 @@ export default function PaymentsAdminPage() {
             >
               <option value="ALL">🌐 Tất cả cổng thanh toán</option>
               <option value="VNPAY">Cổng VNPAY (QR / ATM)</option>
-              <option value="MOMO">Ví MoMo</option>
-              <option value="ZALOPAY">ZaloPay</option>
             </select>
           </div>
 
@@ -470,7 +468,7 @@ export default function PaymentsAdminPage() {
               <tr>
                 <th>Mã Đơn Vé</th>
                 <th>Cổng Thanh Toán</th>
-                <th>Mã Giao Dịch (Idempotency Key)</th>
+                <th>Mã Giao Dịch (vnp_TxnRef)</th>
                 <th>Số Tiền</th>
                 <th>Thời Gian Giao Dịch</th>
                 <th>Trạng Thái Đối Soát</th>
@@ -520,16 +518,6 @@ export default function PaymentsAdminPage() {
                           <code style={{ color: 'var(--admin-primary-hover)', fontSize: '0.82rem' }}>
                             {p.transactionId}
                           </code>
-                          <span
-                            title="HMAC-SHA512 Chữ ký số hợp lệ"
-                            style={{
-                              display: 'inline-flex', alignItems: 'center', gap: 3,
-                              background: 'rgba(16, 185, 129, 0.15)', color: '#10b981',
-                              fontSize: '0.68rem', padding: '2px 6px', borderRadius: 4, fontWeight: 600
-                            }}
-                          >
-                            <ShieldCheck size={11} /> HMAC OK
-                          </span>
                         </div>
                       </td>
                       <td>

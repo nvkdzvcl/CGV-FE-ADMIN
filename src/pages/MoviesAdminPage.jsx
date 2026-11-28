@@ -350,7 +350,7 @@ export default function MoviesAdminPage() {
                       <div style={{ fontSize: '0.78rem', color: 'var(--admin-text-muted)' }}>{m.originalTitle}</div>
                     </td>
                     <td>{m.duration} phút</td>
-                    <td><span className="status-pill info">{m.ageRating}</span></td>
+                    <td>{m.ageRating ? <span className="status-pill info">{m.ageRating}</span> : <span style={{ color: 'var(--admin-text-muted)' }}>Chưa phân loại</span>}</td>
                     <td>{m.genre}</td>
                     <td>{m.releaseDate}</td>
                     <td>
